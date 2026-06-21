@@ -4,8 +4,12 @@ import { TrendChart } from '@/components/dashboard/TrendChart';
 import { RiskRanking } from '@/components/dashboard/RiskRanking';
 import { TodoList } from '@/components/dashboard/TodoList';
 import { useAuditStore, type TrendRiskType } from '@/store/useAuditStore';
-import { Link as LinkIcon, Users, FolderOpen, Clock, AlertOctagon, Layers, ShieldAlert } from 'lucide-react';
+import { Link as LinkIcon, Users, FolderOpen, Clock, AlertOctagon, Layers, ShieldAlert, Folder, UserCircle, Calendar, ListTodo, Bell, X, ArrowUpCircle } from 'lucide-react';
 import { RiskDetailDrawer } from '@/components/risk/RiskDetailDrawer';
+import { RiskBadge } from '@/components/common/RiskBadge';
+import { StatusBadge } from '@/components/common/StatusBadge';
+import { getRiskReasonTypeText } from '@/utils/format';
+import { formatDate, getRelativeDateString } from '@/utils/date';
 import { useMemo } from 'react';
 
 const metricConfigByType: Record<TrendRiskType, {
@@ -63,8 +67,9 @@ const metricConfigByType: Record<TrendRiskType, {
 
 export function Dashboard() {
   const state = useAuditStore();
-  const { trendRiskType, trendDepartmentId, getFilteredFolders } = state;
+  const { trendRiskType, trendDepartmentId, getFilteredFolders, departments, recentBatchOperations, clearRecentBatchOperations, escalateTask } = state;
   const filteredFolders = getFilteredFolders();
+  const now = new Date();
   
   const metrics = useMemo(() => {
     return metricConfigByType[trendRiskType] || metricConfigByType.all;
@@ -87,6 +92,14 @@ export function Dashboard() {
       completionRate: rate,
     };
   }, [filteredFolders]);
+  
+  const currentDeptName = trendDepartmentId === 'all'
+    ? '全部部门'
+    : departments.find(d => d.id === trendDepartmentId)?.name || '全部部门';
+  
+  const handleEscalate = (folderId: string) => {
+    escalateTask(folderId, '逾期多次催办，问题升级处理');
+  };
   
   return (
     <Layout 
@@ -119,6 +132,139 @@ export function Dashboard() {
           <div className="lg:col-span-1">
             <RiskRanking />
           </div>
+        </div>
+        
+        <div className="card overflow-hidden">
+          <div className="p-4 border-b border-white/10">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Folder className="w-5 h-5 text-blue-400" />
+                <h3 className="text-base font-semibold text-white">
+                  风险文件夹清单
+                </h3>
+                <span className="px-2 py-0.5 bg-white/10 text-white/60 text-xs rounded-md">
+                  {filteredFolders.length} 个
+                </span>
+                <span className="text-xs text-white/40">
+                  {currentDeptName} · {trendRiskType === 'all' ? '全部风险' : getRiskReasonTypeText(trendRiskType)}
+                </span>
+              </div>
+            </div>
+          </div>
+          
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-white/5">
+                  <th className="text-left px-4 py-3 text-xs font-medium text-white/50 uppercase tracking-wider">文件夹</th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-white/50 uppercase tracking-wider">部门</th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-white/50 uppercase tracking-wider">负责人</th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-white/50 uppercase tracking-wider">风险原因</th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-white/50 uppercase tracking-wider">整改状态</th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-white/50 uppercase tracking-wider">截止日</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredFolders.slice(0, 20).map((folder) => {
+                  const task = folder.currentTask;
+                  const taskOverdue = task?.dueDate && new Date(task.dueDate) < now && task.status !== 'completed';
+                  const canEscalate = task && task.urgeCount >= 2 && (task.status === 'overdue' || taskOverdue) && task.status !== 'escalated' && task.status !== 'completed';
+                  
+                  return (
+                    <tr
+                      key={folder.id}
+                      onClick={() => { state.setSelectedFolder(folder); state.setDetailDrawerOpen(true); }}
+                      className="border-b border-white/5 hover:bg-white/5 cursor-pointer transition-colors group"
+                    >
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <Folder className="w-4 h-4 text-blue-400 flex-shrink-0" />
+                          <div>
+                            <p className="text-sm font-medium text-white group-hover:text-blue-400 transition-colors">{folder.name}</p>
+                            <p className="text-xs text-white/40 font-mono truncate max-w-[200px]">{folder.path}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-xs text-white/60">{folder.departmentName}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        {task ? (
+                          <div className="flex items-center gap-1.5">
+                            <UserCircle className="w-3.5 h-3.5 text-white/40" />
+                            <span className="text-xs text-white/80 font-medium">{task.assignee}</span>
+                            {task.urgeCount > 0 && (
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 text-[10px]">
+                                <Bell className="w-2.5 h-2.5" />{task.urgeCount}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-white/30">{folder.owner}</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-1">
+                          <RiskBadge level={folder.riskLevel} size="sm" />
+                          {folder.riskReasons.slice(0, 1).map((r) => (
+                            <span key={r.id} className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/60">
+                              {getRiskReasonTypeText(r.type)}
+                            </span>
+                          ))}
+                          {folder.riskReasons.length > 1 && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/60">+{folder.riskReasons.length - 1}</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        {task ? (
+                          <div className="flex items-center gap-1.5">
+                            <StatusBadge status={task.status} size="sm" />
+                            {canEscalate && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleEscalate(folder.id); }}
+                                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-400 text-[10px] border border-orange-500/30 hover:bg-orange-500/30 transition-colors"
+                                title="升级处理"
+                              >
+                                <ArrowUpCircle className="w-3 h-3" />升级
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-white/30">未分配</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {task?.dueDate ? (
+                          <div className="flex items-center gap-1.5">
+                            <Calendar className="w-3.5 h-3.5 text-white/40" />
+                            <span className={`text-xs font-mono ${taskOverdue ? 'text-red-400' : 'text-white/60'}`}>
+                              {task.dueDate.split('T')[0]}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-white/30">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          
+          {filteredFolders.length > 20 && (
+            <div className="p-3 border-t border-white/5 text-center">
+              <span className="text-xs text-white/40">仅展示前 20 条，共 {filteredFolders.length} 条记录</span>
+            </div>
+          )}
+          
+          {filteredFolders.length === 0 && (
+            <div className="p-8 text-center">
+              <Folder className="w-12 h-12 text-white/20 mx-auto mb-3" />
+              <p className="text-sm text-white/50">当前筛选条件下无风险文件夹</p>
+            </div>
+          )}
         </div>
         
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -167,6 +313,42 @@ export function Dashboard() {
             </div>
           </div>
         </div>
+        
+        {recentBatchOperations.length > 0 && (
+          <div className="card p-4 border border-emerald-500/20 bg-emerald-500/5">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <ListTodo className="w-4 h-4 text-emerald-400" />
+                <h3 className="text-sm font-semibold text-white">最近批量操作记录</h3>
+              </div>
+              <button
+                onClick={clearRecentBatchOperations}
+                className="w-6 h-6 rounded-md bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/40 hover:text-white/70 transition-colors"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <div className="space-y-2">
+              {recentBatchOperations.slice(0, 3).map((record) => (
+                <div key={record.id} className="flex items-start gap-3 p-2.5 rounded-lg bg-white/5">
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-emerald-500/10">
+                    <ListTodo className="w-4 h-4 text-emerald-400" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-white">{record.action}</span>
+                      <span className="text-[11px] text-white/40">{formatDate(record.operatedAt)}</span>
+                    </div>
+                    <p className="text-xs text-white/50 mt-0.5">{record.detail}</p>
+                    <p className="text-[11px] text-white/40 mt-1 truncate">
+                      影响文件夹: {record.folderNames.join('、')}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
       
       <RiskDetailDrawer />

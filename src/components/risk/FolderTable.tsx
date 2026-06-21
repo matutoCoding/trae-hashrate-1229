@@ -5,9 +5,9 @@ import { StatusBadge } from '@/components/common/StatusBadge';
 import { useAuditStore } from '@/store/useAuditStore';
 import { 
   Folder, User, Calendar, ChevronRight, Search, CheckSquare, Square, 
-  ListChecks, X, Users, CheckCircle2, Check, Bell, CalendarClock, UserCircle, ListTodo
+  ListChecks, X, Users, CheckCircle2, Check, Bell, CalendarClock, UserCircle, ListTodo, ArrowUpCircle
 } from 'lucide-react';
-import { getRelativeDateString } from '@/utils/date';
+import { getRelativeDateString, formatDate } from '@/utils/date';
 import { getRiskReasonTypeText } from '@/utils/format';
 
 interface FolderTableProps {
@@ -385,6 +385,8 @@ export function FolderTable({ folders, departmentName }: FolderTableProps) {
     setBatchAssignModalOpen,
     setBatchRescheduleModalOpen,
     batchCompleteTask,
+    recentBatchOperations,
+    clearRecentBatchOperations,
   } = useAuditStore();
   
   const [filterLevel, setFilterLevel] = useState<RiskLevel | 'all'>('all');
@@ -655,8 +657,12 @@ export function FolderTable({ folders, departmentName }: FolderTableProps) {
                           <span className="text-xs text-white/80 font-medium">{task.assignee}</span>
                           {task.urgeCount > 0 && (
                             <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 text-[10px]">
-                              <Bell className="w-2.5 h-2.5" />
-                              {task.urgeCount}
+                              <Bell className="w-2.5 h-2.5" />{task.urgeCount}
+                            </span>
+                          )}
+                          {task.status === 'escalated' && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-400 text-[10px]">
+                              <ArrowUpCircle className="w-2.5 h-2.5" />
                             </span>
                           )}
                         </div>
@@ -730,6 +736,29 @@ export function FolderTable({ folders, departmentName }: FolderTableProps) {
         <div className="p-8 text-center">
           <Folder className="w-12 h-12 text-white/20 mx-auto mb-3" />
           <p className="text-sm text-white/50">没有找到匹配的文件夹</p>
+        </div>
+      )}
+      
+      {recentBatchOperations.length > 0 && (
+        <div className="p-3 border-t border-white/5 bg-emerald-500/5">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[11px] text-emerald-400 font-medium">最近批量操作</span>
+            <button
+              onClick={clearRecentBatchOperations}
+              className="text-white/30 hover:text-white/60 transition-colors"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+          {recentBatchOperations.slice(0, 2).map((record) => (
+            <div key={record.id} className="flex items-center gap-2 text-[11px] text-white/50 py-1">
+              <ListTodo className="w-3 h-3 text-emerald-400 flex-shrink-0" />
+              <span className="text-white/70 font-medium">{record.action}</span>
+              <span className="text-white/40">—</span>
+              <span className="truncate">{record.detail}</span>
+              <span className="text-white/30 ml-auto flex-shrink-0">{record.folderNames.length} 个文件夹</span>
+            </div>
+          ))}
         </div>
       )}
       

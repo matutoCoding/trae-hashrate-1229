@@ -26,6 +26,7 @@ export function getStatusText(status: string): string {
     in_progress: '处理中',
     completed: '已完成',
     overdue: '已超期',
+    escalated: '已升级',
   };
   return map[status] || status;
 }

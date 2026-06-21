@@ -1,6 +1,6 @@
 import type { RemediationStatus } from '@/types';
 import { getStatusText } from '@/utils/format';
-import { Clock, PlayCircle, CheckCircle2, AlertOctagon } from 'lucide-react';
+import { Clock, PlayCircle, CheckCircle2, AlertOctagon, ArrowUpCircle } from 'lucide-react';
 
 interface StatusBadgeProps {
   status: RemediationStatus;
@@ -32,6 +32,12 @@ export function StatusBadge({ status, size = 'md' }: StatusBadgeProps) {
       text: 'text-red-400',
       border: 'border-red-500/30',
       icon: AlertOctagon,
+    },
+    escalated: {
+      bg: 'bg-orange-500/15',
+      text: 'text-orange-400',
+      border: 'border-orange-500/30',
+      icon: ArrowUpCircle,
     },
   };
   

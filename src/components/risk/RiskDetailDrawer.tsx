@@ -4,13 +4,13 @@ import { RiskBadge } from '@/components/common/RiskBadge';
 import { StatusBadge } from '@/components/common/StatusBadge';
 import { 
   X, Folder, User, Calendar, Clock, Users, Edit3, History, AlertTriangle, 
-  CheckCircle, MessageSquare, Bell, CalendarClock, UserCircle, ListTodo 
+  CheckCircle, MessageSquare, Bell, CalendarClock, UserCircle, ListTodo, ArrowUpCircle
 } from 'lucide-react';
 import { formatDateTime, formatDate } from '@/utils/date';
 import { getRiskReasonTypeText } from '@/utils/format';
 
 export function RiskDetailDrawer() {
-  const { selectedFolder, isDetailDrawerOpen, setDetailDrawerOpen, completeTask, assignTask, urgeTask, rescheduleTask } = useAuditStore();
+  const { selectedFolder, isDetailDrawerOpen, setDetailDrawerOpen, completeTask, assignTask, urgeTask, rescheduleTask, escalateTask } = useAuditStore();
   const [showAssignForm, setShowAssignForm] = useState(false);
   const [showRescheduleForm, setShowRescheduleForm] = useState(false);
   const [showUrgeForm, setShowUrgeForm] = useState(false);
@@ -66,6 +66,7 @@ export function RiskDetailDrawer() {
   const task = selectedFolder.currentTask;
   const taskDueSoon = task?.dueDate && new Date(task.dueDate) < new Date(Date.now() + 3 * 24 * 60 * 60 * 1000) && task.status !== 'completed';
   const taskOverdue = task?.dueDate && new Date(task.dueDate) < new Date() && task.status !== 'completed';
+  const canEscalate = task && task.urgeCount >= 2 && (task.status === 'overdue' || taskOverdue) && task.status !== 'escalated' && task.status !== 'completed';
   
   return (
     <>
@@ -111,10 +112,17 @@ export function RiskDetailDrawer() {
                     已催办 {task.urgeCount} 次
                   </span>
                 )}
+                {task?.status === 'escalated' && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-orange-500/20 text-orange-400 text-xs border border-orange-500/30">
+                    <ArrowUpCircle className="w-3.5 h-3.5" />
+                    已升级处理
+                  </span>
+                )}
               </div>
               
               {task && (
                 <div className={`p-4 rounded-xl border ${
+                  task.status === 'escalated' ? 'bg-orange-500/10 border-orange-500/30' :
                   taskOverdue ? 'bg-red-500/10 border-red-500/30' :
                   taskDueSoon ? 'bg-amber-500/10 border-amber-500/30' :
                   task.status === 'completed' ? 'bg-emerald-500/10 border-emerald-500/30' :
@@ -123,6 +131,7 @@ export function RiskDetailDrawer() {
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
                       <ListTodo className={`w-4 h-4 ${
+                        task.status === 'escalated' ? 'text-orange-400' :
                         taskOverdue ? 'text-red-400' :
                         taskDueSoon ? 'text-amber-400' :
                         task.status === 'completed' ? 'text-emerald-400' :
@@ -385,12 +394,14 @@ export function RiskDetailDrawer() {
                       <div className="absolute left-2 top-5 bottom-0 w-px bg-white/10"></div>
                     )}
                     <div className={`absolute left-0 top-1.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                      record.action.includes('升级') ? 'bg-orange-500/20 border-orange-500/40' :
                       record.action.includes('催办') ? 'bg-red-500/20 border-red-500/40' :
                       record.action.includes('完成') ? 'bg-emerald-500/20 border-emerald-500/40' :
                       record.action.includes('改期') || record.action.includes('调整') ? 'bg-amber-500/20 border-amber-500/40' :
                       'bg-blue-500/20 border-blue-500/40'
                     }`}>
                       <div className={`w-1.5 h-1.5 rounded-full ${
+                        record.action.includes('升级') ? 'bg-orange-400' :
                         record.action.includes('催办') ? 'bg-red-400' :
                         record.action.includes('完成') ? 'bg-emerald-400' :
                         record.action.includes('改期') || record.action.includes('调整') ? 'bg-amber-400' :
@@ -546,6 +557,15 @@ export function RiskDetailDrawer() {
                       <CheckCircle className="w-4 h-4" />
                       标记完成
                     </button>
+                    {canEscalate && (
+                      <button
+                        onClick={() => { escalateTask(selectedFolder.id, '逾期多次催办，问题升级处理'); }}
+                        className="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-lg transition-colors duration-200 font-medium flex items-center justify-center gap-2"
+                      >
+                        <ArrowUpCircle className="w-4 h-4" />
+                        升级处理
+                      </button>
+                    )}
                     <button
                       onClick={() => setShowUrgeForm(true)}
                       className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg transition-colors duration-200 font-medium flex items-center justify-center gap-2"

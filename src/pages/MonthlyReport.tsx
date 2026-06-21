@@ -3,7 +3,7 @@ import { Layout } from '@/components/common/Layout';
 import { useAuditStore, type MeetingIssueFilter } from '@/store/useAuditStore';
 import { 
   FileBarChart, TrendingUp, TrendingDown, Calendar, Clock, RefreshCw, Award, AlertTriangle,
-  Users, ChevronDown, ChevronRight, Presentation, BarChart3, Folder, UserCircle, CheckCircle2, XCircle, AlertOctagon, ListTodo, MessageSquare, Bell
+  Users, ChevronDown, ChevronRight, Presentation, BarChart3, Folder, UserCircle, CheckCircle2, XCircle, AlertOctagon, ListTodo, MessageSquare, Bell, ArrowUpCircle, Copy, Check
 } from 'lucide-react';
 import { formatNumber } from '@/utils/format';
 import { RiskBadge } from '@/components/common/RiskBadge';
@@ -20,9 +20,10 @@ const filterConfig: { key: MeetingIssueFilter; label: string; icon: any; color: 
 ];
 
 export function MonthlyReport() {
-  const { monthlyReport, folders, departments, toggleDepartmentInReport, expandedDepartmentsInReport, meetingIssueFilterByDept, setMeetingIssueFilter } = useAuditStore();
+  const { monthlyReport, folders, departments, toggleDepartmentInReport, expandedDepartmentsInReport, meetingIssueFilterByDept, setMeetingIssueFilter, escalateTask } = useAuditStore();
   const { departmentRankings, topRecurringIssues } = monthlyReport;
   const [activeView, setActiveView] = useState<ReportView>('overview');
+  const [copied, setCopied] = useState(false);
   
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -79,6 +80,7 @@ export function MonthlyReport() {
   const getNextAction = (folder: any): string => {
     if (!folder.currentTask) return '待分配整改任务';
     if (folder.currentTask.status === 'completed') return '已完成，持续监控';
+    if (folder.currentTask.status === 'escalated') return `已升级处理，需上级关注`;
     if (folder.currentTask.status === 'overdue') return `已逾期 ${folder.currentTask.urgeCount || 0} 次催办，建议升级处理`;
     if (folder.currentTask.dueDate) {
       const daysLeft = Math.ceil((new Date(folder.currentTask.dueDate).getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
@@ -88,6 +90,71 @@ export function MonthlyReport() {
     }
     return '跟进整改进度';
   };
+  
+  const generateMeetingMinutes = (): string => {
+    const lines: string[] = [];
+    lines.push(`【安全例会纪要草稿】`);
+    lines.push(`日期：${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日`);
+    lines.push('');
+    
+    for (const dept of deptIssueStats) {
+      const isExpanded = expandedDepartmentsInReport.includes(dept.id);
+      if (!isExpanded) continue;
+      
+      const activeFilter: MeetingIssueFilter = meetingIssueFilterByDept[dept.id] || 'new';
+      const filteredIssues = 
+        activeFilter === 'new' ? dept.newIssues :
+        activeFilter === 'closed' ? dept.closedIssues :
+        activeFilter === 'overdue' ? dept.overdueIssues :
+        dept.recurringIssues;
+      
+      lines.push(`━━━ ${dept.name} ━━━`);
+      lines.push(`口径：${filterConfig.find(f => f.key === activeFilter)?.label || '本月新增'}`);
+      lines.push('');
+      
+      const followUpItems = filteredIssues.filter((f: any) => f.currentTask && f.currentTask.status !== 'completed');
+      const urgedItems = filteredIssues.filter((f: any) => f.currentTask?.urgeCount > 0);
+      const escalatedItems = filteredIssues.filter((f: any) => f.currentTask?.status === 'escalated');
+      const nextFollowers = [...new Set(filteredIssues.map((f: any) => f.currentTask?.assignee || f.owner).filter(Boolean))];
+      
+      lines.push(`【待追问事项 ${followUpItems.length} 项】`);
+      followUpItems.forEach((f: any) => {
+        lines.push(`- ${f.name}（${f.departmentName}）：${getNextAction(f)}`);
+      });
+      
+      if (urgedItems.length > 0) {
+        lines.push('');
+        lines.push(`【已催办问题 ${urgedItems.length} 项】`);
+        urgedItems.forEach((f: any) => {
+          lines.push(`- ${f.name}：已催办 ${f.currentTask.urgeCount} 次，最近催办 ${f.currentTask.lastUrgedAt ? formatDate(f.currentTask.lastUrgedAt) : '—'}`);
+        });
+      }
+      
+      if (escalatedItems.length > 0) {
+        lines.push('');
+        lines.push(`【已升级处理 ${escalatedItems.length} 项】`);
+        escalatedItems.forEach((f: any) => {
+          lines.push(`- ${f.name}：需上级关注`);
+        });
+      }
+      
+      lines.push('');
+      lines.push(`下次跟进人：${nextFollowers.join('、')}`);
+      lines.push('');
+    }
+    
+    return lines.join('\n');
+  };
+  
+  const handleCopyMinutes = () => {
+    const text = generateMeetingMinutes();
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+  
+  const hasExpandedDept = expandedDepartmentsInReport.length > 0;
   
   return (
     <Layout 
@@ -302,10 +369,25 @@ export function MonthlyReport() {
             <div className="card p-4 bg-blue-500/5 border-blue-500/20">
               <div className="flex items-start gap-3">
                 <Presentation className="w-5 h-5 text-blue-400 mt-0.5 flex-shrink-0" />
-                <div>
-                  <p className="text-sm font-medium text-white">安全例会视图</p>
+                <div className="flex-1">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium text-white">安全例会视图</p>
+                    {hasExpandedDept && (
+                      <button
+                        onClick={handleCopyMinutes}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                          copied
+                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                            : 'bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30'
+                        }`}
+                      >
+                        {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                        {copied ? '已复制' : '复制会议纪要'}
+                      </button>
+                    )}
+                  </div>
                   <p className="text-xs text-white/60 mt-1">
-                    按部门展开查看本月新增、关闭、逾期和复发问题，点击部门行可展开详细问题清单，并通过标签切换不同口径的问题列表。
+                    按部门展开查看本月新增、关闭、逾期和复发问题，点击部门行可展开详细问题清单，并通过标签切换不同口径的问题列表。展开后可一键复制会议纪要草稿。
                   </p>
                 </div>
               </div>
@@ -480,6 +562,12 @@ export function MonthlyReport() {
                                           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 text-[10px] border border-red-500/30">
                                             <Bell className="w-3 h-3" />
                                             已催办 {folder.currentTask.urgeCount} 次
+                                          </span>
+                                        )}
+                                        {folder.currentTask?.status === 'escalated' && (
+                                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-400 text-[10px] border border-orange-500/30">
+                                            <ArrowUpCircle className="w-3 h-3" />
+                                            已升级
                                           </span>
                                         )}
                                       </div>

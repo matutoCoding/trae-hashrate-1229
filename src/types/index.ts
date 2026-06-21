@@ -1,6 +1,6 @@
 export type RiskLevel = 'high' | 'medium' | 'low';
 
-export type RemediationStatus = 'pending' | 'in_progress' | 'completed' | 'overdue';
+export type RemediationStatus = 'pending' | 'in_progress' | 'completed' | 'overdue' | 'escalated';
 
 export type RiskReasonType = 
   | 'external_link' 
@@ -142,4 +142,14 @@ export interface RankingItem {
   mediumRiskCount: number;
   lowRiskCount: number;
   totalRisk: number;
+}
+
+export interface BatchOperationRecord {
+  id: string;
+  action: string;
+  operator: string;
+  operatedAt: string;
+  folderIds: string[];
+  folderNames: string[];
+  detail: string;
 }

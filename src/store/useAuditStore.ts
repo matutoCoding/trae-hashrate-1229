@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { SharedFolder, Department, TrendDataPoint, TodoItem, RankingDimension, RankingItem, MonthlyReport, RiskReasonType } from '@/types';
+import type { SharedFolder, Department, TrendDataPoint, TodoItem, RankingDimension, RankingItem, MonthlyReport, RiskReasonType, BatchOperationRecord } from '@/types';
 import { allFolders as initialFolders } from '@/data/folders';
 import { departments as initialDepartments } from '@/data/departments';
 import { trendData30Days, trendData7Days, trendData90Days } from '@/data/trends';
@@ -69,6 +69,10 @@ interface AuditState {
   batchUrgeTask: (folderIds: string[], remark: string) => void;
   rescheduleTask: (folderId: string, newDueDate: string, remark: string) => void;
   batchRescheduleTask: (folderIds: string[], newDueDate: string, remark: string) => void;
+  escalateTask: (folderId: string, remark: string) => void;
+  
+  recentBatchOperations: BatchOperationRecord[];
+  clearRecentBatchOperations: () => void;
 }
 
 function calcStats(folders: SharedFolder[]) {
@@ -80,24 +84,57 @@ function calcStats(folders: SharedFolder[]) {
   };
 }
 
-function generateTypedTrendData(days: number, type: TrendRiskType, deptId: string | 'all'): TrendDataPoint[] {
+const deptRiskProfiles: Record<string, { base: number; volatility: number; trend: number }> = {
+  'dept-001': { base: 42, volatility: 5, trend: 0.3 },
+  'dept-002': { base: 25, volatility: 3, trend: -0.1 },
+  'dept-003': { base: 10, volatility: 2, trend: -0.2 },
+  'dept-004': { base: 15, volatility: 2, trend: 0.1 },
+  'dept-005': { base: 38, volatility: 6, trend: 0.5 },
+  'dept-006': { base: 20, volatility: 3, trend: -0.1 },
+  'dept-007': { base: 48, volatility: 7, trend: 0.6 },
+  'dept-008': { base: 6, volatility: 1, trend: -0.3 },
+};
+
+function generateTypedTrendData(days: number, type: TrendRiskType, deptId: string | 'all', folders: SharedFolder[]): TrendDataPoint[] {
   const now = new Date();
   const data: TrendDataPoint[] = [];
-  const deptMultiplier = deptId === 'all' ? 1 : 0.25;
+  
+  let baseTotal: number;
+  let volatility: number;
+  let trendDir: number;
+  
+  if (deptId === 'all') {
+    baseTotal = folders.length;
+    volatility = baseTotal * 0.08;
+    trendDir = 0.2;
+  } else {
+    const profile = deptRiskProfiles[deptId];
+    if (profile) {
+      baseTotal = profile.base;
+      volatility = profile.volatility;
+      trendDir = profile.trend;
+    } else {
+      const deptFolders = folders.filter(f => f.departmentId === deptId);
+      baseTotal = deptFolders.length || 10;
+      volatility = baseTotal * 0.1;
+      trendDir = 0.1;
+    }
+  }
+  
   const typeMultiplier = type === 'all' ? 1 : 0.35;
-  const multiplier = deptMultiplier * typeMultiplier;
-  let totalRisks = Math.floor((type === 'all' ? 156 : 40) * deptMultiplier);
+  let totalRisks = Math.floor(baseTotal * typeMultiplier);
   
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date(now);
     d.setDate(d.getDate() - i);
     
-    const newRisks = Math.floor((Math.random() * 8 + 2) * multiplier);
-    const closedRisks = Math.floor((Math.random() * 6 + 1) * multiplier);
+    const dayVolatility = volatility * typeMultiplier;
+    const newRisks = Math.max(0, Math.floor((Math.random() * dayVolatility + 1) + trendDir));
+    const closedRisks = Math.max(0, Math.floor((Math.random() * dayVolatility * 0.8 + 0.5)));
     
-    totalRisks = totalRisks + newRisks - closedRisks;
-    const min = Math.floor((type === 'all' ? 100 : 20) * deptMultiplier);
-    const max = Math.floor((type === 'all' ? 200 : 80) * deptMultiplier);
+    totalRisks = totalRisks + newRisks - closedRisks + Math.round(trendDir * typeMultiplier);
+    const min = Math.floor(baseTotal * typeMultiplier * 0.5);
+    const max = Math.floor(baseTotal * typeMultiplier * 1.8);
     if (totalRisks < min) totalRisks = min;
     if (totalRisks > max) totalRisks = max;
     
@@ -139,6 +176,7 @@ export const useAuditStore = create<AuditState>()(
       batchRescheduleModalOpen: false,
       expandedDepartmentsInReport: [],
       meetingIssueFilterByDept: {},
+      recentBatchOperations: [],
       
       ...calcStats(initialFolders),
       
@@ -265,8 +303,8 @@ export const useAuditStore = create<AuditState>()(
       },
       
       getTrendData: () => {
-        const { trendTimeRange, trendRiskType, trendDepartmentId } = get();
-        return generateTypedTrendData(trendTimeRange, trendRiskType, trendDepartmentId);
+        const { trendTimeRange, trendRiskType, trendDepartmentId, folders } = get();
+        return generateTypedTrendData(trendTimeRange, trendRiskType, trendDepartmentId, folders);
       },
 
       getFilteredFolders: () => {
@@ -330,8 +368,10 @@ export const useAuditStore = create<AuditState>()(
         const now = new Date().toISOString();
         
         set(state => {
+          const affectedNames: string[] = [];
           const updatedFolders = state.folders.map(f => {
             if (!folderIds.includes(f.id)) return f;
+            affectedNames.push(f.name);
             const newTask = {
               id: `task-${Date.now()}-${f.id}`,
               folderId: f.id,
@@ -368,12 +408,23 @@ export const useAuditStore = create<AuditState>()(
             updatedSelected = updatedFolders.find(f => f.id === updatedSelected.id) || null;
           }
           
+          const batchRecord: BatchOperationRecord = {
+            id: `batch-${Date.now()}`,
+            action: '批量分配整改任务',
+            operator: '安全管理员',
+            operatedAt: now,
+            folderIds,
+            folderNames: affectedNames,
+            detail: `分配给 ${assignee}，截止日期 ${dueDate}`,
+          };
+          
           return {
             folders: updatedFolders,
             selectedFolder: updatedSelected,
             selectedFolderIds: [],
             isBatchMode: false,
             batchAssignModalOpen: false,
+            recentBatchOperations: [batchRecord, ...state.recentBatchOperations].slice(0, 10),
             ...stats,
           };
         });
@@ -418,8 +469,10 @@ export const useAuditStore = create<AuditState>()(
         const now = new Date().toISOString();
         
         set(state => {
+          const affectedNames: string[] = [];
           const updatedFolders = state.folders.map(f => {
             if (!folderIds.includes(f.id) || !f.currentTask) return f;
+            affectedNames.push(f.name);
             const newRecord = {
               id: `record-${Date.now()}-${f.id}`,
               action: '批量整改完成',
@@ -444,11 +497,22 @@ export const useAuditStore = create<AuditState>()(
             updatedSelected = updatedFolders.find(f => f.id === updatedSelected.id) || null;
           }
           
+          const batchRecord: BatchOperationRecord = {
+            id: `batch-${Date.now()}`,
+            action: '批量整改完成',
+            operator: '安全管理员',
+            operatedAt: now,
+            folderIds,
+            folderNames: affectedNames,
+            detail: `标记 ${affectedNames.length} 个文件夹整改完成`,
+          };
+          
           return {
             folders: updatedFolders,
             selectedFolder: updatedSelected,
             selectedFolderIds: [],
             isBatchMode: false,
+            recentBatchOperations: [batchRecord, ...state.recentBatchOperations].slice(0, 10),
             ...stats,
           };
         });
@@ -498,8 +562,10 @@ export const useAuditStore = create<AuditState>()(
         const now = new Date().toISOString();
         
         set(state => {
+          const affectedNames: string[] = [];
           const updatedFolders = state.folders.map(f => {
             if (!folderIds.includes(f.id) || !f.currentTask) return f;
+            affectedNames.push(f.name);
             const urgeRecord = {
               id: `urge-${Date.now()}-${f.id}`,
               urgedAt: now,
@@ -530,11 +596,22 @@ export const useAuditStore = create<AuditState>()(
             updatedSelected = updatedFolders.find(f => f.id === updatedSelected.id) || null;
           }
           
+          const batchRecord: BatchOperationRecord = {
+            id: `batch-${Date.now()}`,
+            action: '批量催办整改',
+            operator: '安全管理员',
+            operatedAt: now,
+            folderIds,
+            folderNames: affectedNames,
+            detail: remark || '请尽快完成整改任务',
+          };
+          
           return {
             folders: updatedFolders,
             selectedFolder: updatedSelected,
             selectedFolderIds: [],
             isBatchMode: false,
+            recentBatchOperations: [batchRecord, ...state.recentBatchOperations].slice(0, 10),
           };
         });
       },
@@ -584,8 +661,10 @@ export const useAuditStore = create<AuditState>()(
         const now = new Date().toISOString();
         
         set(state => {
+          const affectedNames: string[] = [];
           const updatedFolders = state.folders.map(f => {
             if (!folderIds.includes(f.id) || !f.currentTask) return f;
+            affectedNames.push(f.name);
             const rescheduleRecord = {
               id: `reschedule-${Date.now()}-${f.id}`,
               oldDueDate: f.currentTask.dueDate,
@@ -617,15 +696,60 @@ export const useAuditStore = create<AuditState>()(
             updatedSelected = updatedFolders.find(f => f.id === updatedSelected.id) || null;
           }
           
+          const batchRecord: BatchOperationRecord = {
+            id: `batch-${Date.now()}`,
+            action: '批量调整整改截止日',
+            operator: '安全管理员',
+            operatedAt: now,
+            folderIds,
+            folderNames: affectedNames,
+            detail: `调整为 ${newDueDate}`,
+          };
+          
           return {
             folders: updatedFolders,
             selectedFolder: updatedSelected,
             selectedFolderIds: [],
             isBatchMode: false,
             batchRescheduleModalOpen: false,
+            recentBatchOperations: [batchRecord, ...state.recentBatchOperations].slice(0, 10),
           };
         });
       },
+      
+      escalateTask: (folderId, remark) => {
+        const now = new Date().toISOString();
+        
+        set(state => {
+          const updatedFolders = state.folders.map(f => {
+            if (f.id !== folderId || !f.currentTask) return f;
+            const newRecord = {
+              id: `record-${Date.now()}`,
+              action: '升级处理',
+              operator: '安全管理员',
+              operatedAt: now,
+              remark: remark || '逾期多次催办，问题升级处理',
+            };
+            return {
+              ...f,
+              currentTask: {
+                ...f.currentTask,
+                status: 'escalated' as const,
+              },
+              remediationHistory: [...f.remediationHistory, newRecord],
+            };
+          });
+          
+          const updatedFolder = updatedFolders.find(f => f.id === folderId) || null;
+          
+          return {
+            folders: updatedFolders,
+            selectedFolder: state.selectedFolder?.id === folderId ? updatedFolder : state.selectedFolder,
+          };
+        });
+      },
+      
+      clearRecentBatchOperations: () => set({ recentBatchOperations: [] }),
     }),
     {
       name: 'permission-audit-store',
