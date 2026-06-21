@@ -4,13 +4,13 @@ import { TrendChart } from '@/components/dashboard/TrendChart';
 import { RiskRanking } from '@/components/dashboard/RiskRanking';
 import { TodoList } from '@/components/dashboard/TodoList';
 import { useAuditStore, type TrendRiskType } from '@/store/useAuditStore';
-import { Link as LinkIcon, Users, FolderOpen, Clock, AlertOctagon, Layers, ShieldAlert, Folder, UserCircle, Calendar, ListTodo, Bell, X, ArrowUpCircle } from 'lucide-react';
+import { Link as LinkIcon, Users, FolderOpen, Clock, AlertOctagon, Layers, ShieldAlert, Folder, UserCircle, Calendar, ListTodo, Bell, X, ArrowUpCircle, ChevronRight } from 'lucide-react';
 import { RiskDetailDrawer } from '@/components/risk/RiskDetailDrawer';
 import { RiskBadge } from '@/components/common/RiskBadge';
 import { StatusBadge } from '@/components/common/StatusBadge';
-import { getRiskReasonTypeText } from '@/utils/format';
+import { getRiskReasonTypeText, getStatusText } from '@/utils/format';
 import { formatDate, getRelativeDateString } from '@/utils/date';
-import { useMemo } from 'react';
+import { useState, useMemo } from 'react';
 
 const metricConfigByType: Record<TrendRiskType, {
   title: string;
@@ -67,8 +67,21 @@ const metricConfigByType: Record<TrendRiskType, {
 
 export function Dashboard() {
   const state = useAuditStore();
-  const { trendRiskType, trendDepartmentId, getFilteredFolders, departments, recentBatchOperations, clearRecentBatchOperations, escalateTask } = state;
+  const { 
+    trendRiskType, 
+    trendDepartmentId, 
+    getFilteredFolders, 
+    getEscalatedFolders,
+    departments, 
+    recentBatchOperations, 
+    clearRecentBatchOperations, 
+    escalateTask,
+    setSelectedBatchOperation,
+    setBatchOperationDetailModalOpen,
+  } = state;
+  const [showEscalationLedger, setShowEscalationLedger] = useState(false);
   const filteredFolders = getFilteredFolders();
+  const escalatedFolders = getEscalatedFolders();
   const now = new Date();
   
   const metrics = useMemo(() => {
@@ -311,6 +324,22 @@ export function Dashboard() {
                 <span>目标 85%</span>
               </div>
             </div>
+            
+            {escalatedFolders.length > 0 && (
+              <button
+                onClick={() => setShowEscalationLedger(true)}
+                className="w-full mt-4 p-3 rounded-lg bg-orange-500/10 border border-orange-500/30 hover:bg-orange-500/15 transition-all flex items-center justify-between group"
+              >
+                <div className="flex items-center gap-2">
+                  <ArrowUpCircle className="w-4 h-4 text-orange-400" />
+                  <span className="text-sm font-medium text-orange-400">升级台账</span>
+                  <span className="text-xs px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-400 font-mono">
+                    {escalatedFolders.length} 项
+                  </span>
+                </div>
+                <ChevronRight className="w-4 h-4 text-orange-400/50 group-hover:translate-x-0.5 transition-transform" />
+              </button>
+            )}
           </div>
         </div>
         
@@ -330,7 +359,14 @@ export function Dashboard() {
             </div>
             <div className="space-y-2">
               {recentBatchOperations.slice(0, 3).map((record) => (
-                <div key={record.id} className="flex items-start gap-3 p-2.5 rounded-lg bg-white/5">
+                <div 
+                  key={record.id} 
+                  className="flex items-start gap-3 p-2.5 rounded-lg bg-white/5 hover:bg-white/10 cursor-pointer transition-colors group"
+                  onClick={() => {
+                    setSelectedBatchOperation(record);
+                    setBatchOperationDetailModalOpen(true);
+                  }}
+                >
                   <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-emerald-500/10">
                     <ListTodo className="w-4 h-4 text-emerald-400" />
                   </div>
@@ -340,12 +376,152 @@ export function Dashboard() {
                       <span className="text-[11px] text-white/40">{formatDate(record.operatedAt)}</span>
                     </div>
                     <p className="text-xs text-white/50 mt-0.5">{record.detail}</p>
-                    <p className="text-[11px] text-white/40 mt-1 truncate">
-                      影响文件夹: {record.folderNames.join('、')}
+                    <p className="text-[11px] text-emerald-400/70 mt-1 flex items-center gap-1">
+                      <span>点击查看完整影响名单</span>
+                      <ChevronRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
                     </p>
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+        
+        {showEscalationLedger && escalatedFolders.length > 0 && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-white/10 rounded-2xl w-full max-w-4xl max-h-[85vh] flex flex-col shadow-2xl">
+              <div className="p-5 border-b border-white/10 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <ArrowUpCircle className="w-5 h-5 text-orange-400" />
+                  <h3 className="text-lg font-semibold text-white">升级问题台账</h3>
+                  <span className="text-xs px-2 py-0.5 rounded bg-orange-500/20 text-orange-400 font-mono">
+                    共 {escalatedFolders.length} 项
+                  </span>
+                </div>
+                <button
+                  onClick={() => setShowEscalationLedger(false)}
+                  className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white/80 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="p-5 overflow-y-auto flex-1">
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-white/10">
+                        <th className="text-left px-3 py-2.5 text-xs font-medium text-white/50 uppercase tracking-wider">文件夹</th>
+                        <th className="text-left px-3 py-2.5 text-xs font-medium text-white/50 uppercase tracking-wider">部门</th>
+                        <th className="text-left px-3 py-2.5 text-xs font-medium text-white/50 uppercase tracking-wider">负责人</th>
+                        <th className="text-left px-3 py-2.5 text-xs font-medium text-white/50 uppercase tracking-wider">催办次数</th>
+                        <th className="text-left px-3 py-2.5 text-xs font-medium text-white/50 uppercase tracking-wider">升级时间</th>
+                        <th className="text-left px-3 py-2.5 text-xs font-medium text-white/50 uppercase tracking-wider">当前状态</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {escalatedFolders.map((folder) => {
+                        const task = folder.currentTask!;
+                        const escalationRecord = folder.remediationHistory.find(r => r.action === '升级处理');
+                        return (
+                          <tr
+                            key={folder.id}
+                            onClick={() => {
+                              state.setSelectedFolder(folder);
+                              state.setDetailDrawerOpen(true);
+                              setShowEscalationLedger(false);
+                            }}
+                            className="border-b border-white/5 hover:bg-white/5 cursor-pointer transition-colors group"
+                          >
+                            <td className="px-3 py-3">
+                              <div className="flex items-center gap-2">
+                                <Folder className="w-4 h-4 text-orange-400 flex-shrink-0" />
+                                <div>
+                                  <p className="text-sm font-medium text-white group-hover:text-orange-400 transition-colors">{folder.name}</p>
+                                  <p className="text-xs text-white/40 font-mono truncate max-w-[180px]">{folder.path}</p>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-3 py-3">
+                              <span className="text-xs text-white/60">{folder.departmentName}</span>
+                            </td>
+                            <td className="px-3 py-3">
+                              <div className="flex items-center gap-1.5">
+                                <UserCircle className="w-3.5 h-3.5 text-white/40" />
+                                <span className="text-xs text-white/80 font-medium">{task.assignee}</span>
+                              </div>
+                            </td>
+                            <td className="px-3 py-3">
+                              <span className="text-xs font-mono text-red-400">{task.urgeCount} 次</span>
+                            </td>
+                            <td className="px-3 py-3">
+                              <span className="text-xs text-white/60 font-mono">
+                                {escalationRecord ? formatDate(escalationRecord.operatedAt) : '—'}
+                              </span>
+                            </td>
+                            <td className="px-3 py-3">
+                              <StatusBadge status={task.status} size="sm" />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {state.batchOperationDetailModalOpen && state.selectedBatchOperation && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-white/10 rounded-2xl w-full max-w-lg max-h-[75vh] flex flex-col shadow-2xl">
+              <div className="p-5 border-b border-white/10 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <ListTodo className="w-5 h-5 text-emerald-400" />
+                  <h3 className="text-lg font-semibold text-white">{state.selectedBatchOperation.action}</h3>
+                </div>
+                <button
+                  onClick={() => {
+                    setBatchOperationDetailModalOpen(false);
+                    setSelectedBatchOperation(null);
+                  }}
+                  className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white/80 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="p-5 overflow-y-auto flex-1 space-y-4">
+                <div className="p-3 rounded-lg bg-white/5 space-y-2">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-white/50">操作人</span>
+                    <span className="text-white/80 font-medium">{state.selectedBatchOperation.operator}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-white/50">操作时间</span>
+                    <span className="text-white/80 font-mono">{formatDate(state.selectedBatchOperation.operatedAt)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-white/50">影响数量</span>
+                    <span className="text-emerald-400 font-mono font-medium">{state.selectedBatchOperation.folderIds.length} 个文件夹</span>
+                  </div>
+                  <div className="pt-2 border-t border-white/5">
+                    <p className="text-xs text-white/50 mb-1">操作详情</p>
+                    <p className="text-sm text-white/80">{state.selectedBatchOperation.detail}</p>
+                  </div>
+                </div>
+                
+                <div>
+                  <p className="text-xs text-white/50 mb-2">影响文件夹名单</p>
+                  <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
+                    {state.selectedBatchOperation.folderNames.map((name, idx) => (
+                      <div key={idx} className="flex items-center gap-2 p-2 rounded bg-white/5 text-xs">
+                        <Folder className="w-3.5 h-3.5 text-emerald-400/60 flex-shrink-0" />
+                        <span className="text-white/70">{name}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )}

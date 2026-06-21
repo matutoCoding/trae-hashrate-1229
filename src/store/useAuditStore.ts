@@ -30,6 +30,10 @@ interface AuditState {
   
   expandedDepartmentsInReport: string[];
   meetingIssueFilterByDept: Record<string, MeetingIssueFilter>;
+  selectedMeetingIssues: string[];
+  
+  batchOperationDetailModalOpen: boolean;
+  selectedBatchOperation: BatchOperationRecord | null;
   
   setSelectedFolder: (folder: SharedFolder | null) => void;
   setDetailDrawerOpen: (open: boolean) => void;
@@ -44,6 +48,7 @@ interface AuditState {
   getCurrentRankings: () => RankingItem[];
   getTrendData: () => TrendDataPoint[];
   getFilteredFolders: () => SharedFolder[];
+  getEscalatedFolders: () => SharedFolder[];
   getFilteredStats: () => { externalLinksCount: number; externalAccountsCount: number; publicEditableCount: number; overdueReviewCount: number };
   
   toggleFolderSelection: (folderId: string) => void;
@@ -53,6 +58,12 @@ interface AuditState {
   setBatchRescheduleModalOpen: (open: boolean) => void;
   toggleDepartmentInReport: (deptId: string) => void;
   setMeetingIssueFilter: (deptId: string, filter: MeetingIssueFilter) => void;
+  toggleMeetingIssue: (folderId: string) => void;
+  clearMeetingIssues: () => void;
+  batchAssignMeetingAction: (folderIds: string[], assignee: string, dueDate: string, remark: string) => void;
+  
+  setBatchOperationDetailModalOpen: (open: boolean) => void;
+  setSelectedBatchOperation: (record: BatchOperationRecord | null) => void;
   
   externalLinksCount: number;
   externalAccountsCount: number;
@@ -95,46 +106,63 @@ const deptRiskProfiles: Record<string, { base: number; volatility: number; trend
   'dept-008': { base: 6, volatility: 1, trend: -0.3 },
 };
 
-function generateTypedTrendData(days: number, type: TrendRiskType, deptId: string | 'all', folders: SharedFolder[]): TrendDataPoint[] {
+function seededRandom(seed: number): number {
+  const x = Math.sin(seed) * 10000;
+  return x - Math.floor(x);
+}
+
+function generateTypedTrendData(days: number, type: TrendRiskType, deptId: string | 'all', folders: SharedFolder[], filteredCount: number): TrendDataPoint[] {
   const now = new Date();
   const data: TrendDataPoint[] = [];
+  
+  const seedStr = `${days}-${type}-${deptId}`;
+  let seed = 0;
+  for (let i = 0; i < seedStr.length; i++) {
+    seed = ((seed << 5) - seed) + seedStr.charCodeAt(i);
+    seed = seed & seed;
+  }
   
   let baseTotal: number;
   let volatility: number;
   let trendDir: number;
   
   if (deptId === 'all') {
-    baseTotal = folders.length;
-    volatility = baseTotal * 0.08;
-    trendDir = 0.2;
+    baseTotal = Math.max(filteredCount, 5);
+    volatility = Math.max(baseTotal * 0.08, 2);
+    trendDir = 0.15;
   } else {
     const profile = deptRiskProfiles[deptId];
+    const typeMultiplier = type === 'all' ? 1 : 0.35;
     if (profile) {
-      baseTotal = profile.base;
-      volatility = profile.volatility;
+      baseTotal = Math.max(Math.floor(profile.base * typeMultiplier), 3);
+      volatility = Math.max(profile.volatility * typeMultiplier, 1);
       trendDir = profile.trend;
     } else {
-      const deptFolders = folders.filter(f => f.departmentId === deptId);
-      baseTotal = deptFolders.length || 10;
-      volatility = baseTotal * 0.1;
+      baseTotal = Math.max(filteredCount, 5);
+      volatility = Math.max(baseTotal * 0.1, 2);
       trendDir = 0.1;
     }
   }
   
-  const typeMultiplier = type === 'all' ? 1 : 0.35;
-  let totalRisks = Math.floor(baseTotal * typeMultiplier);
+  let totalRisks = baseTotal;
+  let randSeed = seed;
   
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date(now);
     d.setDate(d.getDate() - i);
     
-    const dayVolatility = volatility * typeMultiplier;
-    const newRisks = Math.max(0, Math.floor((Math.random() * dayVolatility + 1) + trendDir));
-    const closedRisks = Math.max(0, Math.floor((Math.random() * dayVolatility * 0.8 + 0.5)));
+    randSeed = (randSeed * 1103515245 + 12345) & 0x7fffffff;
+    const rand1 = seededRandom(randSeed);
+    randSeed = (randSeed * 1103515245 + 12345) & 0x7fffffff;
+    const rand2 = seededRandom(randSeed);
     
-    totalRisks = totalRisks + newRisks - closedRisks + Math.round(trendDir * typeMultiplier);
-    const min = Math.floor(baseTotal * typeMultiplier * 0.5);
-    const max = Math.floor(baseTotal * typeMultiplier * 1.8);
+    const dayVolatility = volatility;
+    const newRisks = Math.max(0, Math.floor((rand1 * dayVolatility + 1) + trendDir));
+    const closedRisks = Math.max(0, Math.floor((rand2 * dayVolatility * 0.8 + 0.5)));
+    
+    totalRisks = totalRisks + newRisks - closedRisks + Math.round(trendDir);
+    const min = Math.floor(baseTotal * 0.6);
+    const max = Math.floor(baseTotal * 1.6);
     if (totalRisks < min) totalRisks = min;
     if (totalRisks > max) totalRisks = max;
     
@@ -177,6 +205,9 @@ export const useAuditStore = create<AuditState>()(
       expandedDepartmentsInReport: [],
       meetingIssueFilterByDept: {},
       recentBatchOperations: [],
+      selectedMeetingIssues: [],
+      batchOperationDetailModalOpen: false,
+      selectedBatchOperation: null,
       
       ...calcStats(initialFolders),
       
@@ -205,6 +236,92 @@ export const useAuditStore = create<AuditState>()(
       setMeetingIssueFilter: (deptId, filter) => set(state => ({
         meetingIssueFilterByDept: { ...state.meetingIssueFilterByDept, [deptId]: filter },
       })),
+      
+      toggleMeetingIssue: (folderId) => {
+        set(state => ({
+          selectedMeetingIssues: state.selectedMeetingIssues.includes(folderId)
+            ? state.selectedMeetingIssues.filter(id => id !== folderId)
+            : [...state.selectedMeetingIssues, folderId],
+        }));
+      },
+      
+      clearMeetingIssues: () => set({ selectedMeetingIssues: [] }),
+      
+      batchAssignMeetingAction: (folderIds, assignee, dueDate, remark) => {
+        const now = new Date().toISOString();
+        
+        set(state => {
+          const affectedNames: string[] = [];
+          const updatedFolders = state.folders.map(f => {
+            if (!folderIds.includes(f.id)) return f;
+            affectedNames.push(f.name);
+            
+            const newTask = f.currentTask ? {
+              ...f.currentTask,
+              assignee,
+              assigneeEmail: `${assignee}@company.com`,
+              dueDate: new Date(dueDate).toISOString(),
+              status: 'in_progress' as const,
+            } : {
+              id: `task-${Date.now()}-${f.id}`,
+              folderId: f.id,
+              assignee,
+              assigneeEmail: `${assignee}@company.com`,
+              assigner: '安全管理员',
+              assignedAt: now,
+              dueDate: new Date(dueDate).toISOString(),
+              status: 'pending' as const,
+              completedAt: null,
+              remark,
+              urgeCount: 0,
+              lastUrgedAt: null,
+              urgeRecords: [],
+              rescheduleRecords: [],
+            };
+            
+            const newRecord = {
+              id: `record-${Date.now()}-${f.id}`,
+              action: '会议跟进动作',
+              operator: '安全管理员',
+              operatedAt: now,
+              remark: `分配给 ${assignee}，跟进截止 ${dueDate}${remark ? '：' + remark : ''}`,
+            };
+            
+            return {
+              ...f,
+              currentTask: newTask,
+              remediationHistory: [...f.remediationHistory, newRecord],
+            };
+          });
+          
+          const stats = calcStats(updatedFolders);
+          let updatedSelected = state.selectedFolder;
+          if (updatedSelected && folderIds.includes(updatedSelected.id)) {
+            updatedSelected = updatedFolders.find(f => f.id === updatedSelected.id) || null;
+          }
+          
+          const batchRecord: BatchOperationRecord = {
+            id: `batch-${Date.now()}`,
+            action: '会议跟进批量分配',
+            operator: '安全管理员',
+            operatedAt: now,
+            folderIds,
+            folderNames: affectedNames,
+            detail: `分配给 ${assignee}，跟进截止 ${dueDate}`,
+          };
+          
+          return {
+            folders: updatedFolders,
+            selectedFolder: updatedSelected,
+            selectedMeetingIssues: [],
+            recentBatchOperations: [batchRecord, ...state.recentBatchOperations].slice(0, 10),
+            ...stats,
+          };
+        });
+      },
+      
+      setBatchOperationDetailModalOpen: (open) => set({ batchOperationDetailModalOpen: open }),
+      setSelectedBatchOperation: (record) => set({ selectedBatchOperation: record }),
       
       toggleDepartmentInReport: (deptId) => {
         set(state => ({
@@ -303,13 +420,19 @@ export const useAuditStore = create<AuditState>()(
       },
       
       getTrendData: () => {
-        const { trendTimeRange, trendRiskType, trendDepartmentId, folders } = get();
-        return generateTypedTrendData(trendTimeRange, trendRiskType, trendDepartmentId, folders);
+        const { trendTimeRange, trendRiskType, trendDepartmentId, folders, getFilteredFolders } = get();
+        const filtered = getFilteredFolders();
+        return generateTypedTrendData(trendTimeRange, trendRiskType, trendDepartmentId, folders, filtered.length);
       },
 
       getFilteredFolders: () => {
         const { folders, trendRiskType, trendDepartmentId } = get();
         return filterFoldersByDeptAndType(folders, trendDepartmentId, trendRiskType);
+      },
+
+      getEscalatedFolders: () => {
+        const { folders } = get();
+        return folders.filter(f => f.currentTask?.status === 'escalated');
       },
 
       getFilteredStats: () => {
@@ -756,6 +879,7 @@ export const useAuditStore = create<AuditState>()(
       partialize: (state) => ({
         folders: state.folders,
         todos: state.todos,
+        recentBatchOperations: state.recentBatchOperations,
       }),
     }
   )

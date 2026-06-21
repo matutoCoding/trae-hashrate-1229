@@ -3,7 +3,7 @@ import { Layout } from '@/components/common/Layout';
 import { useAuditStore, type MeetingIssueFilter } from '@/store/useAuditStore';
 import { 
   FileBarChart, TrendingUp, TrendingDown, Calendar, Clock, RefreshCw, Award, AlertTriangle,
-  Users, ChevronDown, ChevronRight, Presentation, BarChart3, Folder, UserCircle, CheckCircle2, XCircle, AlertOctagon, ListTodo, MessageSquare, Bell, ArrowUpCircle, Copy, Check
+  Users, ChevronDown, ChevronRight, Presentation, BarChart3, Folder, UserCircle, CheckCircle2, XCircle, AlertOctagon, ListTodo, MessageSquare, Bell, ArrowUpCircle, Copy, Check, Square, CheckSquare, UserPlus, CalendarClock, X
 } from 'lucide-react';
 import { formatNumber } from '@/utils/format';
 import { RiskBadge } from '@/components/common/RiskBadge';
@@ -20,10 +20,27 @@ const filterConfig: { key: MeetingIssueFilter; label: string; icon: any; color: 
 ];
 
 export function MonthlyReport() {
-  const { monthlyReport, folders, departments, toggleDepartmentInReport, expandedDepartmentsInReport, meetingIssueFilterByDept, setMeetingIssueFilter, escalateTask } = useAuditStore();
+  const { 
+    monthlyReport, 
+    folders, 
+    departments, 
+    toggleDepartmentInReport, 
+    expandedDepartmentsInReport, 
+    meetingIssueFilterByDept, 
+    setMeetingIssueFilter, 
+    escalateTask,
+    selectedMeetingIssues,
+    toggleMeetingIssue,
+    clearMeetingIssues,
+    batchAssignMeetingAction,
+  } = useAuditStore();
   const { departmentRankings, topRecurringIssues } = monthlyReport;
   const [activeView, setActiveView] = useState<ReportView>('overview');
   const [copied, setCopied] = useState(false);
+  const [showBatchAction, setShowBatchAction] = useState(false);
+  const [batchAssignee, setBatchAssignee] = useState('');
+  const [batchDueDate, setBatchDueDate] = useState('');
+  const [batchRemark, setBatchRemark] = useState('');
   
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -109,38 +126,61 @@ export function MonthlyReport() {
         dept.recurringIssues;
       
       lines.push(`━━━ ${dept.name} ━━━`);
-      lines.push(`口径：${filterConfig.find(f => f.key === activeFilter)?.label || '本月新增'}`);
+      lines.push(`口径：${filterConfig.find(f => f.key === activeFilter)?.label || '本月新增'}（${filteredIssues.length} 项问题）`);
       lines.push('');
       
-      const followUpItems = filteredIssues.filter((f: any) => f.currentTask && f.currentTask.status !== 'completed');
-      const urgedItems = filteredIssues.filter((f: any) => f.currentTask?.urgeCount > 0);
-      const escalatedItems = filteredIssues.filter((f: any) => f.currentTask?.status === 'escalated');
-      const nextFollowers = [...new Set(filteredIssues.map((f: any) => f.currentTask?.assignee || f.owner).filter(Boolean))];
-      
-      lines.push(`【待追问事项 ${followUpItems.length} 项】`);
-      followUpItems.forEach((f: any) => {
-        lines.push(`- ${f.name}（${f.departmentName}）：${getNextAction(f)}`);
+      const unassignedItems = filteredIssues.filter((f: any) => !f.currentTask);
+      const inProgressItems = filteredIssues.filter((f: any) => f.currentTask && (f.currentTask.status === 'pending' || f.currentTask.status === 'in_progress'));
+      const overdueItems = filteredIssues.filter((f: any) => {
+        if (!f.currentTask) return false;
+        const taskOverdue = f.currentTask.status === 'overdue' || 
+          (f.currentTask.dueDate && new Date(f.currentTask.dueDate) < now && f.currentTask.status !== 'completed');
+        return taskOverdue && f.currentTask.status !== 'escalated';
       });
+      const escalatedItems = filteredIssues.filter((f: any) => f.currentTask?.status === 'escalated');
       
-      if (urgedItems.length > 0) {
-        lines.push('');
-        lines.push(`【已催办问题 ${urgedItems.length} 项】`);
-        urgedItems.forEach((f: any) => {
-          lines.push(`- ${f.name}：已催办 ${f.currentTask.urgeCount} 次，最近催办 ${f.currentTask.lastUrgedAt ? formatDate(f.currentTask.lastUrgedAt) : '—'}`);
+      if (unassignedItems.length > 0) {
+        lines.push(`【待分配 ${unassignedItems.length} 项】—— 需先派人跟进`);
+        unassignedItems.forEach((f: any) => {
+          lines.push(`- ${f.name}（${f.departmentName}）：当前负责人 ${f.owner}，${getNextAction(f)}`);
         });
+        lines.push('');
+      }
+      
+      if (inProgressItems.length > 0) {
+        lines.push(`【处理中 ${inProgressItems.length} 项】—— 按计划跟进`);
+        inProgressItems.forEach((f: any) => {
+          const daysLeft = f.currentTask.dueDate ? Math.ceil((new Date(f.currentTask.dueDate).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)) : null;
+          const deadlineInfo = daysLeft !== null ? `，截止 ${f.currentTask.dueDate.split('T')[0]}（${daysLeft >= 0 ? '剩余 ' + daysLeft + ' 天' : '已逾期 ' + Math.abs(daysLeft) + ' 天'}）` : '';
+          const urgeInfo = f.currentTask.urgeCount > 0 ? `，已催办 ${f.currentTask.urgeCount} 次` : '';
+          lines.push(`- ${f.name}：${f.currentTask.assignee} 跟进中${deadlineInfo}${urgeInfo}`);
+        });
+        lines.push('');
+      }
+      
+      if (overdueItems.length > 0) {
+        lines.push(`【已逾期 ${overdueItems.length} 项】—— 需重点追办`);
+        overdueItems.forEach((f: any) => {
+          const urgeInfo = f.currentTask.urgeCount > 0 ? `（已催办 ${f.currentTask.urgeCount} 次）` : '';
+          const canEscalate = f.currentTask.urgeCount >= 2;
+          lines.push(`- ${f.name}：${f.currentTask.assignee} 负责${urgeInfo}${canEscalate ? '，建议升级处理' : ''}`);
+        });
+        lines.push('');
       }
       
       if (escalatedItems.length > 0) {
-        lines.push('');
-        lines.push(`【已升级处理 ${escalatedItems.length} 项】`);
+        lines.push(`【已升级 ${escalatedItems.length} 项】—— 需上级关注`);
         escalatedItems.forEach((f: any) => {
-          lines.push(`- ${f.name}：需上级关注`);
+          lines.push(`- ${f.name}：${f.currentTask.assignee} 负责，已升级处理，请上级协调`);
         });
+        lines.push('');
       }
       
-      lines.push('');
-      lines.push(`下次跟进人：${nextFollowers.join('、')}`);
-      lines.push('');
+      const nextFollowers = [...new Set(filteredIssues.map((f: any) => f.currentTask?.assignee || f.owner).filter(Boolean))];
+      if (nextFollowers.length > 0) {
+        lines.push(`下次跟进人：${nextFollowers.join('、')}`);
+        lines.push('');
+      }
     }
     
     return lines.join('\n');
@@ -152,6 +192,15 @@ export function MonthlyReport() {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
+  };
+  
+  const handleBatchAssign = () => {
+    if (!batchAssignee || !batchDueDate) return;
+    batchAssignMeetingAction(selectedMeetingIssues, batchAssignee, batchDueDate, batchRemark);
+    setShowBatchAction(false);
+    setBatchAssignee('');
+    setBatchDueDate('');
+    setBatchRemark('');
   };
   
   const hasExpandedDept = expandedDepartmentsInReport.length > 0;
@@ -370,28 +419,111 @@ export function MonthlyReport() {
               <div className="flex items-start gap-3">
                 <Presentation className="w-5 h-5 text-blue-400 mt-0.5 flex-shrink-0" />
                 <div className="flex-1">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between flex-wrap gap-3">
                     <p className="text-sm font-medium text-white">安全例会视图</p>
-                    {hasExpandedDept && (
-                      <button
-                        onClick={handleCopyMinutes}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                          copied
-                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                            : 'bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30'
-                        }`}
-                      >
-                        {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                        {copied ? '已复制' : '复制会议纪要'}
-                      </button>
-                    )}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {hasExpandedDept && (
+                        <button
+                          onClick={handleCopyMinutes}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                            copied
+                              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                              : 'bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30'
+                          }`}
+                        >
+                          {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                          {copied ? '已复制' : '复制会议纪要'}
+                        </button>
+                      )}
+                      {selectedMeetingIssues.length > 0 && (
+                        <button
+                          onClick={() => setShowBatchAction(!showBatchAction)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30 transition-all"
+                        >
+                          <ListTodo className="w-3.5 h-3.5" />
+                          批量指定跟进 ({selectedMeetingIssues.length})
+                        </button>
+                      )}
+                      {selectedMeetingIssues.length > 0 && (
+                        <button
+                          onClick={clearMeetingIssues}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-white/10 text-white/60 border border-white/20 hover:bg-white/15 transition-all"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                          清空选择
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <p className="text-xs text-white/60 mt-1">
-                    按部门展开查看本月新增、关闭、逾期和复发问题，点击部门行可展开详细问题清单，并通过标签切换不同口径的问题列表。展开后可一键复制会议纪要草稿。
+                    按部门展开查看本月新增、关闭、逾期和复发问题。可勾选问题作为会后跟进动作，批量指定跟进人和跟进日期。展开后可一键复制会议纪要草稿。
                   </p>
                 </div>
               </div>
             </div>
+            
+            {showBatchAction && selectedMeetingIssues.length > 0 && (
+              <div className="card p-4 bg-emerald-500/5 border-emerald-500/20">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <UserPlus className="w-4 h-4 text-emerald-400" />
+                    <p className="text-sm font-medium text-white">批量指定会后跟进动作</p>
+                    <span className="text-xs text-emerald-400">已选 {selectedMeetingIssues.length} 项</span>
+                  </div>
+                  <button
+                    onClick={() => setShowBatchAction(false)}
+                    className="w-6 h-6 rounded-md bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/40 hover:text-white/70 transition-colors"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-xs text-white/50 mb-1 block">跟进人</label>
+                    <input
+                      type="text"
+                      value={batchAssignee}
+                      onChange={(e) => setBatchAssignee(e.target.value)}
+                      placeholder="输入负责人姓名"
+                      className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-500/50 transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-white/50 mb-1 block">跟进截止日期</label>
+                    <input
+                      type="date"
+                      value={batchDueDate}
+                      onChange={(e) => setBatchDueDate(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-white focus:outline-none focus:border-emerald-500/50 transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-white/50 mb-1 block">备注（可选）</label>
+                    <input
+                      type="text"
+                      value={batchRemark}
+                      onChange={(e) => setBatchRemark(e.target.value)}
+                      placeholder="跟进说明"
+                      className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-white placeholder-white/30 focus:outline-none focus:border-emerald-500/50 transition-colors"
+                    />
+                  </div>
+                </div>
+                <div className="flex justify-end mt-3">
+                  <button
+                    onClick={handleBatchAssign}
+                    disabled={!batchAssignee || !batchDueDate}
+                    className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium transition-all ${
+                      !batchAssignee || !batchDueDate
+                        ? 'bg-white/10 text-white/30 cursor-not-allowed'
+                        : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30'
+                    }`}
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    确认分配
+                  </button>
+                </div>
+              </div>
+            )}
             
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
               <div className="card p-4">
@@ -543,78 +675,94 @@ export function MonthlyReport() {
                           
                           {filteredIssues.length > 0 ? (
                             <div className="space-y-2">
-                              {filteredIssues.map((folder: any) => (
-                                <div 
-                                  key={folder.id}
-                                  className="p-4 rounded-lg bg-white/5 border border-white/5 hover:bg-white/10 transition-colors"
-                                >
-                                  <div className="flex items-start gap-3">
-                                    <div className="w-9 h-9 rounded-lg bg-blue-500/10 flex items-center justify-center flex-shrink-0">
-                                      <Folder className="w-4 h-4 text-blue-400" />
-                                    </div>
-                                    
-                                    <div className="flex-1 min-w-0">
-                                      <div className="flex items-center gap-2 flex-wrap">
-                                        <p className="text-sm font-medium text-white">{folder.name}</p>
-                                        <RiskBadge level={folder.riskLevel} size="sm" />
-                                        {folder.currentTask && <StatusBadge status={folder.currentTask.status} size="sm" />}
-                                        {folder.currentTask?.urgeCount > 0 && (
-                                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 text-[10px] border border-red-500/30">
-                                            <Bell className="w-3 h-3" />
-                                            已催办 {folder.currentTask.urgeCount} 次
-                                          </span>
+                              {filteredIssues.map((folder: any) => {
+                                const isSelected = selectedMeetingIssues.includes(folder.id);
+                                return (
+                                  <div 
+                                    key={folder.id}
+                                    className="p-4 rounded-lg bg-white/5 border border-white/5 hover:bg-white/10 transition-colors"
+                                  >
+                                    <div className="flex items-start gap-3">
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          toggleMeetingIssue(folder.id);
+                                        }}
+                                        className="mt-1 flex-shrink-0"
+                                      >
+                                        {isSelected ? (
+                                          <CheckSquare className="w-5 h-5 text-emerald-400" />
+                                        ) : (
+                                          <Square className="w-5 h-5 text-white/30 hover:text-white/50 transition-colors" />
                                         )}
-                                        {folder.currentTask?.status === 'escalated' && (
-                                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-400 text-[10px] border border-orange-500/30">
-                                            <ArrowUpCircle className="w-3 h-3" />
-                                            已升级
-                                          </span>
-                                        )}
-                                      </div>
-                                      <p className="text-xs text-white/40 mt-0.5 font-mono truncate">{folder.path}</p>
-                                      
-                                      <div className="flex items-center gap-4 mt-2.5 text-xs flex-wrap">
-                                        <span className="flex items-center gap-1 text-white/60">
-                                          <UserCircle className="w-3 h-3" />
-                                          责任人: <span className="text-white/80 font-medium">{folder.owner}</span>
-                                        </span>
-                                        {folder.nextReviewDue && (
-                                          <span className="flex items-center gap-1 text-white/60">
-                                            <Calendar className="w-3 h-3" />
-                                            复核: <span className={new Date(folder.nextReviewDue) < now ? 'text-red-400' : 'text-white/80'}>
-                                              {formatDate(folder.nextReviewDue)}
-                                            </span>
-                                          </span>
-                                        )}
-                                        {folder.currentTask?.dueDate && (
-                                          <span className="flex items-center gap-1 text-white/60">
-                                            <ListTodo className="w-3 h-3" />
-                                            整改截止: <span className={new Date(folder.currentTask.dueDate) < now ? 'text-red-400' : 'text-white/80'}>
-                                              {formatDate(folder.currentTask.dueDate)}
-                                            </span>
-                                          </span>
-                                        )}
-                                        {folder.currentTask?.lastUrgedAt && (
-                                          <span className="flex items-center gap-1 text-amber-400">
-                                            <Bell className="w-3 h-3" />
-                                            最近催办: {formatDate(folder.currentTask.lastUrgedAt)}
-                                          </span>
-                                        )}
+                                      </button>
+                                      <div className="w-9 h-9 rounded-lg bg-blue-500/10 flex items-center justify-center flex-shrink-0">
+                                        <Folder className="w-4 h-4 text-blue-400" />
                                       </div>
                                       
-                                      <div className="mt-3 pt-3 border-t border-white/5">
-                                        <div className="flex items-start gap-2">
-                                          <MessageSquare className="w-3.5 h-3.5 text-amber-400 mt-0.5 flex-shrink-0" />
-                                          <div>
-                                            <p className="text-xs text-white/50">下一步追问动作</p>
-                                            <p className="text-xs text-white/80 mt-0.5">{getNextAction(folder)}</p>
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <p className="text-sm font-medium text-white">{folder.name}</p>
+                                          <RiskBadge level={folder.riskLevel} size="sm" />
+                                          {folder.currentTask && <StatusBadge status={folder.currentTask.status} size="sm" />}
+                                          {folder.currentTask?.urgeCount > 0 && (
+                                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 text-[10px] border border-red-500/30">
+                                              <Bell className="w-3 h-3" />
+                                              已催办 {folder.currentTask.urgeCount} 次
+                                            </span>
+                                          )}
+                                          {folder.currentTask?.status === 'escalated' && (
+                                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-400 text-[10px] border border-orange-500/30">
+                                              <ArrowUpCircle className="w-3 h-3" />
+                                              已升级
+                                            </span>
+                                          )}
+                                        </div>
+                                        <p className="text-xs text-white/40 mt-0.5 font-mono truncate">{folder.path}</p>
+                                        
+                                        <div className="flex items-center gap-4 mt-2.5 text-xs flex-wrap">
+                                          <span className="flex items-center gap-1 text-white/60">
+                                            <UserCircle className="w-3 h-3" />
+                                            责任人: <span className="text-white/80 font-medium">{folder.owner}</span>
+                                          </span>
+                                          {folder.nextReviewDue && (
+                                            <span className="flex items-center gap-1 text-white/60">
+                                              <Calendar className="w-3 h-3" />
+                                              复核: <span className={new Date(folder.nextReviewDue) < now ? 'text-red-400' : 'text-white/80'}>
+                                                {formatDate(folder.nextReviewDue)}
+                                              </span>
+                                            </span>
+                                          )}
+                                          {folder.currentTask?.dueDate && (
+                                            <span className="flex items-center gap-1 text-white/60">
+                                              <ListTodo className="w-3 h-3" />
+                                              整改截止: <span className={new Date(folder.currentTask.dueDate) < now ? 'text-red-400' : 'text-white/80'}>
+                                                {formatDate(folder.currentTask.dueDate)}
+                                              </span>
+                                            </span>
+                                          )}
+                                          {folder.currentTask?.lastUrgedAt && (
+                                            <span className="flex items-center gap-1 text-amber-400">
+                                              <Bell className="w-3 h-3" />
+                                              最近催办: {formatDate(folder.currentTask.lastUrgedAt)}
+                                            </span>
+                                          )}
+                                        </div>
+                                        
+                                        <div className="mt-3 pt-3 border-t border-white/5">
+                                          <div className="flex items-start gap-2">
+                                            <MessageSquare className="w-3.5 h-3.5 text-amber-400 mt-0.5 flex-shrink-0" />
+                                            <div>
+                                              <p className="text-xs text-white/50">下一步追问动作</p>
+                                              <p className="text-xs text-white/80 mt-0.5">{getNextAction(folder)}</p>
+                                            </div>
                                           </div>
                                         </div>
                                       </div>
                                     </div>
                                   </div>
-                                </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           ) : (
                             <div className="text-center py-8 text-white/40 text-sm">
