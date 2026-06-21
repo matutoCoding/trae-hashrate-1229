@@ -8,6 +8,7 @@ import { todoItems as initialTodos, getProjectRankings, getOwnerRankings, monthl
 
 export type TrendRiskType = 'all' | RiskReasonType;
 export type TimeRange = 7 | 30 | 90;
+export type MeetingIssueFilter = 'new' | 'closed' | 'overdue' | 'recurring';
 
 interface AuditState {
   folders: SharedFolder[];
@@ -20,30 +21,38 @@ interface AuditState {
   
   trendRiskType: TrendRiskType;
   trendTimeRange: TimeRange;
+  trendDepartmentId: string | 'all';
   
   selectedFolderIds: string[];
   isBatchMode: boolean;
   batchAssignModalOpen: boolean;
+  batchRescheduleModalOpen: boolean;
   
   expandedDepartmentsInReport: string[];
+  meetingIssueFilterByDept: Record<string, MeetingIssueFilter>;
   
   setSelectedFolder: (folder: SharedFolder | null) => void;
   setDetailDrawerOpen: (open: boolean) => void;
   setRankingDimension: (dim: RankingDimension) => void;
   setTrendRiskType: (type: TrendRiskType) => void;
   setTrendTimeRange: (range: TimeRange) => void;
+  setTrendDepartmentId: (deptId: string | 'all') => void;
   
   getDepartmentRankings: () => RankingItem[];
   getProjectRankings: () => RankingItem[];
   getOwnerRankings: () => RankingItem[];
   getCurrentRankings: () => RankingItem[];
   getTrendData: () => TrendDataPoint[];
+  getFilteredFolders: () => SharedFolder[];
+  getFilteredStats: () => { externalLinksCount: number; externalAccountsCount: number; publicEditableCount: number; overdueReviewCount: number };
   
   toggleFolderSelection: (folderId: string) => void;
   clearFolderSelection: () => void;
   setBatchMode: (mode: boolean) => void;
   setBatchAssignModalOpen: (open: boolean) => void;
+  setBatchRescheduleModalOpen: (open: boolean) => void;
   toggleDepartmentInReport: (deptId: string) => void;
+  setMeetingIssueFilter: (deptId: string, filter: MeetingIssueFilter) => void;
   
   externalLinksCount: number;
   externalAccountsCount: number;
@@ -55,6 +64,11 @@ interface AuditState {
   batchAssignTask: (folderIds: string[], assignee: string, dueDate: string, remark: string) => void;
   completeTask: (folderId: string) => void;
   batchCompleteTask: (folderIds: string[]) => void;
+  
+  urgeTask: (folderId: string, remark: string) => void;
+  batchUrgeTask: (folderIds: string[], remark: string) => void;
+  rescheduleTask: (folderId: string, newDueDate: string, remark: string) => void;
+  batchRescheduleTask: (folderIds: string[], newDueDate: string, remark: string) => void;
 }
 
 function calcStats(folders: SharedFolder[]) {
@@ -66,22 +80,24 @@ function calcStats(folders: SharedFolder[]) {
   };
 }
 
-function generateTypedTrendData(days: number, type: TrendRiskType): TrendDataPoint[] {
+function generateTypedTrendData(days: number, type: TrendRiskType, deptId: string | 'all'): TrendDataPoint[] {
   const now = new Date();
   const data: TrendDataPoint[] = [];
-  let totalRisks = type === 'all' ? 156 : 40;
+  const deptMultiplier = deptId === 'all' ? 1 : 0.25;
+  const typeMultiplier = type === 'all' ? 1 : 0.35;
+  const multiplier = deptMultiplier * typeMultiplier;
+  let totalRisks = Math.floor((type === 'all' ? 156 : 40) * deptMultiplier);
   
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date(now);
     d.setDate(d.getDate() - i);
     
-    const multiplier = type === 'all' ? 1 : 0.35;
     const newRisks = Math.floor((Math.random() * 8 + 2) * multiplier);
     const closedRisks = Math.floor((Math.random() * 6 + 1) * multiplier);
     
     totalRisks = totalRisks + newRisks - closedRisks;
-    const min = type === 'all' ? 100 : 20;
-    const max = type === 'all' ? 200 : 80;
+    const min = Math.floor((type === 'all' ? 100 : 20) * deptMultiplier);
+    const max = Math.floor((type === 'all' ? 200 : 80) * deptMultiplier);
     if (totalRisks < min) totalRisks = min;
     if (totalRisks > max) totalRisks = max;
     
@@ -96,6 +112,14 @@ function generateTypedTrendData(days: number, type: TrendRiskType): TrendDataPoi
   return data;
 }
 
+function filterFoldersByDeptAndType(folders: SharedFolder[], deptId: string | 'all', type: TrendRiskType): SharedFolder[] {
+  return folders.filter(f => {
+    if (deptId !== 'all' && f.departmentId !== deptId) return false;
+    if (type === 'all') return true;
+    return f.riskReasons.some(r => r.type === type);
+  });
+}
+
 export const useAuditStore = create<AuditState>()(
   persist(
     (set, get) => ({
@@ -108,10 +132,13 @@ export const useAuditStore = create<AuditState>()(
       rankingDimension: 'department',
       trendRiskType: 'all',
       trendTimeRange: 30,
+      trendDepartmentId: 'all',
       selectedFolderIds: [],
       isBatchMode: false,
       batchAssignModalOpen: false,
+      batchRescheduleModalOpen: false,
       expandedDepartmentsInReport: [],
+      meetingIssueFilterByDept: {},
       
       ...calcStats(initialFolders),
       
@@ -133,8 +160,13 @@ export const useAuditStore = create<AuditState>()(
       setRankingDimension: (dim) => set({ rankingDimension: dim }),
       setTrendRiskType: (type) => set({ trendRiskType: type }),
       setTrendTimeRange: (range) => set({ trendTimeRange: range }),
+      setTrendDepartmentId: (deptId) => set({ trendDepartmentId: deptId }),
       setBatchMode: (mode) => set({ isBatchMode: mode, selectedFolderIds: [] }),
       setBatchAssignModalOpen: (open) => set({ batchAssignModalOpen: open }),
+      setBatchRescheduleModalOpen: (open) => set({ batchRescheduleModalOpen: open }),
+      setMeetingIssueFilter: (deptId, filter) => set(state => ({
+        meetingIssueFilterByDept: { ...state.meetingIssueFilterByDept, [deptId]: filter },
+      })),
       
       toggleDepartmentInReport: (deptId) => {
         set(state => ({
@@ -233,8 +265,18 @@ export const useAuditStore = create<AuditState>()(
       },
       
       getTrendData: () => {
-        const { trendTimeRange, trendRiskType } = get();
-        return generateTypedTrendData(trendTimeRange, trendRiskType);
+        const { trendTimeRange, trendRiskType, trendDepartmentId } = get();
+        return generateTypedTrendData(trendTimeRange, trendRiskType, trendDepartmentId);
+      },
+
+      getFilteredFolders: () => {
+        const { folders, trendRiskType, trendDepartmentId } = get();
+        return filterFoldersByDeptAndType(folders, trendDepartmentId, trendRiskType);
+      },
+
+      getFilteredStats: () => {
+        const filtered = get().getFilteredFolders();
+        return calcStats(filtered);
       },
       
       assignTask: (folderId, assignee, dueDate, remark) => {
@@ -250,6 +292,10 @@ export const useAuditStore = create<AuditState>()(
           status: 'pending' as const,
           completedAt: null,
           remark,
+          urgeCount: 0,
+          lastUrgedAt: null,
+          urgeRecords: [],
+          rescheduleRecords: [],
         };
         const newRecord = {
           id: `record-${Date.now()}`,
@@ -297,6 +343,10 @@ export const useAuditStore = create<AuditState>()(
               status: 'pending' as const,
               completedAt: null,
               remark,
+              urgeCount: 0,
+              lastUrgedAt: null,
+              urgeRecords: [],
+              rescheduleRecords: [],
             };
             const newRecord = {
               id: `record-${Date.now()}-${f.id}`,
@@ -400,6 +450,179 @@ export const useAuditStore = create<AuditState>()(
             selectedFolderIds: [],
             isBatchMode: false,
             ...stats,
+          };
+        });
+      },
+      
+      urgeTask: (folderId, remark) => {
+        const now = new Date().toISOString();
+        const urgeRecord = {
+          id: `urge-${Date.now()}`,
+          urgedAt: now,
+          urger: '安全管理员',
+          remark: remark || '请尽快完成整改任务',
+        };
+        
+        set(state => {
+          const updatedFolders = state.folders.map(f => {
+            if (f.id !== folderId || !f.currentTask) return f;
+            const newRecord = {
+              id: `record-${Date.now()}`,
+              action: '催办整改',
+              operator: '安全管理员',
+              operatedAt: now,
+              remark: urgeRecord.remark,
+            };
+            return {
+              ...f,
+              currentTask: {
+                ...f.currentTask,
+                urgeCount: f.currentTask.urgeCount + 1,
+                lastUrgedAt: now,
+                urgeRecords: [...f.currentTask.urgeRecords, urgeRecord],
+              },
+              remediationHistory: [...f.remediationHistory, newRecord],
+            };
+          });
+          
+          const updatedFolder = updatedFolders.find(f => f.id === folderId) || null;
+          
+          return {
+            folders: updatedFolders,
+            selectedFolder: state.selectedFolder?.id === folderId ? updatedFolder : state.selectedFolder,
+          };
+        });
+      },
+      
+      batchUrgeTask: (folderIds, remark) => {
+        const now = new Date().toISOString();
+        
+        set(state => {
+          const updatedFolders = state.folders.map(f => {
+            if (!folderIds.includes(f.id) || !f.currentTask) return f;
+            const urgeRecord = {
+              id: `urge-${Date.now()}-${f.id}`,
+              urgedAt: now,
+              urger: '安全管理员',
+              remark: remark || '请尽快完成整改任务',
+            };
+            const newRecord = {
+              id: `record-${Date.now()}-${f.id}`,
+              action: '批量催办整改',
+              operator: '安全管理员',
+              operatedAt: now,
+              remark: urgeRecord.remark,
+            };
+            return {
+              ...f,
+              currentTask: {
+                ...f.currentTask,
+                urgeCount: f.currentTask.urgeCount + 1,
+                lastUrgedAt: now,
+                urgeRecords: [...f.currentTask.urgeRecords, urgeRecord],
+              },
+              remediationHistory: [...f.remediationHistory, newRecord],
+            };
+          });
+          
+          let updatedSelected = state.selectedFolder;
+          if (updatedSelected && folderIds.includes(updatedSelected.id)) {
+            updatedSelected = updatedFolders.find(f => f.id === updatedSelected.id) || null;
+          }
+          
+          return {
+            folders: updatedFolders,
+            selectedFolder: updatedSelected,
+            selectedFolderIds: [],
+            isBatchMode: false,
+          };
+        });
+      },
+      
+      rescheduleTask: (folderId, newDueDate, remark) => {
+        const now = new Date().toISOString();
+        
+        set(state => {
+          const updatedFolders = state.folders.map(f => {
+            if (f.id !== folderId || !f.currentTask) return f;
+            const rescheduleRecord = {
+              id: `reschedule-${Date.now()}`,
+              oldDueDate: f.currentTask.dueDate,
+              newDueDate: new Date(newDueDate).toISOString(),
+              rescheduledAt: now,
+              operator: '安全管理员',
+              remark: remark || '调整整改截止日期',
+            };
+            const newRecord = {
+              id: `record-${Date.now()}`,
+              action: '调整整改截止日',
+              operator: '安全管理员',
+              operatedAt: now,
+              remark: `从 ${f.currentTask.dueDate.split('T')[0]} 调整为 ${newDueDate}${remark ? '：' + remark : ''}`,
+            };
+            return {
+              ...f,
+              currentTask: {
+                ...f.currentTask,
+                dueDate: new Date(newDueDate).toISOString(),
+                rescheduleRecords: [...f.currentTask.rescheduleRecords, rescheduleRecord],
+              },
+              remediationHistory: [...f.remediationHistory, newRecord],
+            };
+          });
+          
+          const updatedFolder = updatedFolders.find(f => f.id === folderId) || null;
+          
+          return {
+            folders: updatedFolders,
+            selectedFolder: state.selectedFolder?.id === folderId ? updatedFolder : state.selectedFolder,
+          };
+        });
+      },
+      
+      batchRescheduleTask: (folderIds, newDueDate, remark) => {
+        const now = new Date().toISOString();
+        
+        set(state => {
+          const updatedFolders = state.folders.map(f => {
+            if (!folderIds.includes(f.id) || !f.currentTask) return f;
+            const rescheduleRecord = {
+              id: `reschedule-${Date.now()}-${f.id}`,
+              oldDueDate: f.currentTask.dueDate,
+              newDueDate: new Date(newDueDate).toISOString(),
+              rescheduledAt: now,
+              operator: '安全管理员',
+              remark: remark || '调整整改截止日期',
+            };
+            const newRecord = {
+              id: `record-${Date.now()}-${f.id}`,
+              action: '批量调整整改截止日',
+              operator: '安全管理员',
+              operatedAt: now,
+              remark: `从 ${f.currentTask.dueDate.split('T')[0]} 调整为 ${newDueDate}${remark ? '：' + remark : ''}`,
+            };
+            return {
+              ...f,
+              currentTask: {
+                ...f.currentTask,
+                dueDate: new Date(newDueDate).toISOString(),
+                rescheduleRecords: [...f.currentTask.rescheduleRecords, rescheduleRecord],
+              },
+              remediationHistory: [...f.remediationHistory, newRecord],
+            };
+          });
+          
+          let updatedSelected = state.selectedFolder;
+          if (updatedSelected && folderIds.includes(updatedSelected.id)) {
+            updatedSelected = updatedFolders.find(f => f.id === updatedSelected.id) || null;
+          }
+          
+          return {
+            folders: updatedFolders,
+            selectedFolder: updatedSelected,
+            selectedFolderIds: [],
+            isBatchMode: false,
+            batchRescheduleModalOpen: false,
           };
         });
       },

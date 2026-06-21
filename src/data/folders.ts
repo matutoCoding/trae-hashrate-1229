@@ -116,10 +116,27 @@ function createTask(status: 'pending' | 'in_progress' | 'completed' | 'overdue',
     status,
     completedAt: null,
     remark: '请在截止日期前完成权限整改',
+    urgeCount: 0,
+    lastUrgedAt: null,
+    urgeRecords: [],
+    rescheduleRecords: [],
   };
   
   if (status === 'completed') {
     base.completedAt = daysAgo(2);
+  }
+  
+  if (status === 'overdue') {
+    base.urgeCount = Math.floor(Math.random() * 2) + 1;
+    base.lastUrgedAt = daysAgo(Math.floor(Math.random() * 3) + 1);
+    base.urgeRecords = [
+      {
+        id: `urge-${Math.random().toString(36).slice(2, 9)}`,
+        urgedAt: base.lastUrgedAt,
+        urger: '张明（安全管理员）',
+        remark: '任务已逾期，请尽快完成整改',
+      },
+    ];
   }
   
   return base;

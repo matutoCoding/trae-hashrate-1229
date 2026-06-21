@@ -5,7 +5,7 @@ import { StatusBadge } from '@/components/common/StatusBadge';
 import { useAuditStore } from '@/store/useAuditStore';
 import { 
   Folder, User, Calendar, ChevronRight, Search, CheckSquare, Square, 
-  ListChecks, X, Users, CheckCircle2, Check
+  ListChecks, X, Users, CheckCircle2, Check, Bell, CalendarClock, UserCircle, ListTodo
 } from 'lucide-react';
 import { getRelativeDateString } from '@/utils/date';
 import { getRiskReasonTypeText } from '@/utils/format';
@@ -137,6 +137,242 @@ function BatchAssignModal() {
   );
 }
 
+function BatchRescheduleModal() {
+  const { 
+    batchRescheduleModalOpen, 
+    setBatchRescheduleModalOpen, 
+    selectedFolderIds, 
+    batchRescheduleTask,
+    folders
+  } = useAuditStore();
+  
+  const [newDueDate, setNewDueDate] = useState('');
+  const [remark, setRemark] = useState('');
+  
+  if (!batchRescheduleModalOpen) return null;
+  
+  const selectedFolders = folders.filter(f => selectedFolderIds.includes(f.id));
+  const reschedulable = selectedFolders.filter(f => f.currentTask && f.currentTask.status !== 'completed');
+  
+  const handleSubmit = () => {
+    if (newDueDate && reschedulable.length > 0) {
+      const reschedulableIds = reschedulable.map(f => f.id);
+      batchRescheduleTask(reschedulableIds, newDueDate, remark);
+      setNewDueDate('');
+      setRemark('');
+    }
+  };
+  
+  return (
+    <>
+      <div 
+        className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50"
+        onClick={() => setBatchRescheduleModalOpen(false)}
+      />
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fade-in">
+        <div 
+          className="bg-navy-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-lg animate-slide-up"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="p-5 border-b border-white/10 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/20 flex items-center justify-center">
+                <CalendarClock className="w-5 h-5 text-amber-400" />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-white">批量调整截止日期</h3>
+                <p className="text-xs text-white/50 mt-0.5">可调整 {reschedulable.length} 个进行中的任务</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setBatchRescheduleModalOpen(false)}
+              className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/60 hover:text-white transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          
+          <div className="p-5 space-y-4">
+            <div className="p-3 rounded-lg bg-white/5 border border-white/5 max-h-32 overflow-y-auto">
+              <p className="text-xs text-white/60 mb-2">将调整以下文件夹的截止日：</p>
+              <div className="space-y-1">
+                {reschedulable.map(f => (
+                  <div key={f.id} className="flex items-center justify-between gap-2 text-xs">
+                    <span className="text-white/80 truncate">{f.name}</span>
+                    <span className="text-white/40 font-mono flex-shrink-0">
+                      当前: {f.currentTask?.dueDate?.split('T')[0]}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            
+            <div>
+              <label className="text-xs text-white/60 mb-1.5 block">新截止日期 <span className="text-red-400">*</span></label>
+              <input
+                type="date"
+                value={newDueDate}
+                onChange={(e) => setNewDueDate(e.target.value)}
+                className="w-full h-9 px-3 bg-white/5 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-amber-500/50"
+              />
+            </div>
+            
+            <div>
+              <label className="text-xs text-white/60 mb-1.5 block">改期原因</label>
+              <textarea
+                value={remark}
+                onChange={(e) => setRemark(e.target.value)}
+                placeholder="说明改期原因..."
+                rows={2}
+                className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white placeholder:text-white/40 focus:outline-none focus:border-amber-500/50 resize-none"
+              />
+            </div>
+          </div>
+          
+          <div className="p-5 border-t border-white/10 flex gap-3">
+            <button
+              onClick={() => setBatchRescheduleModalOpen(false)}
+              className="flex-1 btn-secondary"
+            >
+              取消
+            </button>
+            <button
+              onClick={handleSubmit}
+              disabled={!newDueDate || reschedulable.length === 0}
+              className="flex-1 px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg transition-colors duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              确认改期 ({reschedulable.length})
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function BatchUrgeModal() {
+  const { 
+    selectedFolderIds, 
+    batchUrgeTask,
+    folders,
+    clearFolderSelection,
+    setBatchMode,
+    isBatchMode,
+  } = useAuditStore();
+  
+  const [open, setOpen] = useState(false);
+  const [urgeRemark, setUrgeRemark] = useState('');
+  
+  const selectedFolders = folders.filter(f => selectedFolderIds.includes(f.id));
+  const urgeable = selectedFolders.filter(f => f.currentTask && f.currentTask.status !== 'completed');
+  
+  const handleSubmit = () => {
+    if (urgeable.length > 0) {
+      const urgeableIds = urgeable.map(f => f.id);
+      batchUrgeTask(urgeableIds, urgeRemark || '请尽快完成整改任务');
+      setUrgeRemark('');
+      setOpen(false);
+    }
+  };
+  
+  const handleOpen = () => {
+    setOpen(true);
+  };
+  
+  if (!isBatchMode) return null;
+  
+  return (
+    <>
+      {urgeable.length > 0 && (
+        <button
+          onClick={handleOpen}
+          className="flex items-center gap-1.5 !py-1.5 text-xs px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg transition-colors duration-200 font-medium"
+        >
+          <Bell className="w-3.5 h-3.5" />
+          批量催办 ({urgeable.length})
+        </button>
+      )}
+      
+      {open && (
+        <>
+          <div 
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50"
+            onClick={() => setOpen(false)}
+          />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fade-in">
+            <div 
+              className="bg-navy-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-lg animate-slide-up"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-5 border-b border-white/10 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-red-500/20 flex items-center justify-center">
+                    <Bell className="w-5 h-5 text-red-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-semibold text-white">批量催办整改</h3>
+                    <p className="text-xs text-white/50 mt-0.5">将催办 {urgeable.length} 个进行中的任务</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setOpen(false)}
+                  className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/60 hover:text-white transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              
+              <div className="p-5 space-y-4">
+                <div className="p-3 rounded-lg bg-white/5 border border-white/5 max-h-32 overflow-y-auto">
+                  <p className="text-xs text-white/60 mb-2">将催办以下文件夹的负责人：</p>
+                  <div className="space-y-1">
+                    {urgeable.map(f => (
+                      <div key={f.id} className="flex items-center justify-between gap-2 text-xs">
+                        <span className="text-white/80 truncate">{f.name}</span>
+                        <span className="text-white/40 flex-shrink-0">
+                          <UserCircle className="w-3 h-3 inline mr-1" />
+                          {f.currentTask?.assignee}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                
+                <div>
+                  <label className="text-xs text-white/60 mb-1.5 block">催办说明</label>
+                  <textarea
+                    value={urgeRemark}
+                    onChange={(e) => setUrgeRemark(e.target.value)}
+                    placeholder="添加催办内容，例如：请在本周五前完成整改..."
+                    rows={3}
+                    className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white placeholder:text-white/40 focus:outline-none focus:border-red-500/50 resize-none"
+                  />
+                </div>
+              </div>
+              
+              <div className="p-5 border-t border-white/10 flex gap-3">
+                <button
+                  onClick={() => setOpen(false)}
+                  className="flex-1 btn-secondary"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleSubmit}
+                  disabled={urgeable.length === 0}
+                  className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg transition-colors duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  确认催办 ({urgeable.length})
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
 export function FolderTable({ folders, departmentName }: FolderTableProps) {
   const { 
     setSelectedFolder, 
@@ -147,6 +383,7 @@ export function FolderTable({ folders, departmentName }: FolderTableProps) {
     toggleFolderSelection,
     clearFolderSelection,
     setBatchAssignModalOpen,
+    setBatchRescheduleModalOpen,
     batchCompleteTask,
   } = useAuditStore();
   
@@ -166,6 +403,10 @@ export function FolderTable({ folders, departmentName }: FolderTableProps) {
   const someSelected = filteredFolders.some(f => selectedFolderIds.includes(f.id)) && !allSelected;
   const selectedCount = selectedFolderIds.filter(id => filteredFolders.some(f => f.id === id)).length;
   const completableCount = selectedFolderIds.filter(id => {
+    const f = folders.find(f => f.id === id);
+    return f?.currentTask && f.currentTask.status !== 'completed';
+  }).length;
+  const reschedulableCount = selectedFolderIds.filter(id => {
     const f = folders.find(f => f.id === id);
     return f?.currentTask && f.currentTask.status !== 'completed';
   }).length;
@@ -205,6 +446,8 @@ export function FolderTable({ folders, departmentName }: FolderTableProps) {
     }
   };
   
+  const now = new Date();
+  
   return (
     <div className="card overflow-hidden">
       <div className="p-4 border-b border-white/10">
@@ -241,6 +484,16 @@ export function FolderTable({ folders, departmentName }: FolderTableProps) {
                       <Users className="w-3.5 h-3.5" />
                       批量分配
                     </button>
+                    {reschedulableCount > 0 && (
+                      <button
+                        onClick={() => setBatchRescheduleModalOpen(true)}
+                        className="flex items-center gap-1.5 !py-1.5 text-xs px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg transition-colors duration-200 font-medium"
+                      >
+                        <CalendarClock className="w-3.5 h-3.5" />
+                        批量改期 ({reschedulableCount})
+                      </button>
+                    )}
+                    <BatchUrgeModal />
                     {completableCount > 0 && (
                       <button
                         onClick={handleBatchComplete}
@@ -335,7 +588,7 @@ export function FolderTable({ folders, departmentName }: FolderTableProps) {
                 所属项目
               </th>
               <th className="text-left px-4 py-3 text-xs font-medium text-white/50 uppercase tracking-wider">
-                负责人
+                整改信息
               </th>
               <th className="text-left px-4 py-3 text-xs font-medium text-white/50 uppercase tracking-wider">
                 风险等级
@@ -355,6 +608,10 @@ export function FolderTable({ folders, departmentName }: FolderTableProps) {
           <tbody>
             {filteredFolders.map((folder) => {
               const isSelected = selectedFolderIds.includes(folder.id);
+              const task = folder.currentTask;
+              const taskOverdue = task?.dueDate && new Date(task.dueDate) < now && task.status !== 'completed';
+              const taskDueSoon = task?.dueDate && new Date(task.dueDate) < new Date(Date.now() + 3 * 24 * 60 * 60 * 1000) && task.status !== 'completed';
+              
               return (
                 <tr
                   key={folder.id}
@@ -391,12 +648,32 @@ export function FolderTable({ folders, departmentName }: FolderTableProps) {
                     <span className="text-sm text-white/70">{folder.projectName}</span>
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-xs text-white font-medium">
-                        {folder.owner[0]}
+                    {task ? (
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-1.5">
+                          <UserCircle className="w-3.5 h-3.5 text-white/40" />
+                          <span className="text-xs text-white/80 font-medium">{task.assignee}</span>
+                          {task.urgeCount > 0 && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 text-[10px]">
+                              <Bell className="w-2.5 h-2.5" />
+                              {task.urgeCount}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <ListTodo className="w-3.5 h-3.5 text-white/40" />
+                          <span className={`text-xs font-mono ${
+                            taskOverdue ? 'text-red-400' :
+                            taskDueSoon ? 'text-amber-400' :
+                            'text-white/60'
+                          }`}>
+                            {task.dueDate?.split('T')[0]}
+                          </span>
+                        </div>
                       </div>
-                      <span className="text-sm text-white/70">{folder.owner}</span>
-                    </div>
+                    ) : (
+                      <span className="text-xs text-white/30">未分配</span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <RiskBadge level={folder.riskLevel} size="sm" />
@@ -419,8 +696,8 @@ export function FolderTable({ folders, departmentName }: FolderTableProps) {
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    {folder.currentTask ? (
-                      <StatusBadge status={folder.currentTask.status} size="sm" />
+                    {task ? (
+                      <StatusBadge status={task.status} size="sm" />
                     ) : (
                       <span className="text-xs text-white/40">未分配</span>
                     )}
@@ -429,7 +706,7 @@ export function FolderTable({ folders, departmentName }: FolderTableProps) {
                     <div className="flex items-center gap-1.5">
                       <Calendar className="w-3.5 h-3.5 text-white/40" />
                       <span className={`text-xs ${
-                        new Date(folder.nextReviewDue) < new Date() 
+                        new Date(folder.nextReviewDue) < now 
                           ? 'text-red-400' 
                           : 'text-white/60'
                       }`}>
@@ -457,6 +734,7 @@ export function FolderTable({ folders, departmentName }: FolderTableProps) {
       )}
       
       <BatchAssignModal />
+      <BatchRescheduleModal />
     </div>
   );
 }

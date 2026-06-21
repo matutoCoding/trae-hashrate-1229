@@ -1,7 +1,8 @@
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { useAuditStore, type TrendRiskType } from '@/store/useAuditStore';
 import type { TimeRange } from '@/store/useAuditStore';
-import { Link as LinkIcon, Users, Edit3, Clock, ShieldAlert, Layers } from 'lucide-react';
+import { Link as LinkIcon, Users, Edit3, Clock, ShieldAlert, Layers, Building2, ChevronDown } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
 
 const timeRanges: { label: string; value: TimeRange }[] = [
   { label: '7天', value: 7 },
@@ -28,9 +29,25 @@ const typeColors: Record<TrendRiskType, { total: string; new: string; closed: st
 };
 
 export function TrendChart() {
-  const { trendRiskType, trendTimeRange, setTrendRiskType, setTrendTimeRange, getTrendData } = useAuditStore();
+  const { trendRiskType, trendTimeRange, trendDepartmentId, departments, setTrendRiskType, setTrendTimeRange, setTrendDepartmentId, getTrendData } = useAuditStore();
   const trendData = getTrendData();
   const colors = typeColors[trendRiskType];
+  const [deptDropdownOpen, setDeptDropdownOpen] = useState(false);
+  const deptDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (deptDropdownRef.current && !deptDropdownRef.current.contains(e.target as Node)) {
+        setDeptDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const currentDeptName = trendDepartmentId === 'all'
+    ? '全部部门'
+    : departments.find(d => d.id === trendDepartmentId)?.name || '全部部门';
   
   const customTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
@@ -53,23 +70,64 @@ export function TrendChart() {
   return (
     <div className="card p-5">
       <div className="flex flex-col gap-3 mb-5">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <h3 className="text-base font-semibold text-white">风险趋势分析</h3>
             <p className="text-xs text-white/50 mt-0.5">新增、关闭与存量风险变化趋势</p>
           </div>
-          <div className="flex items-center gap-1 bg-white/5 rounded-lg p-1">
-            {timeRanges.map((range) => (
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="relative" ref={deptDropdownRef}>
               <button
-                key={range.value}
-                onClick={() => setTrendTimeRange(range.value)}
-                className={`tab-btn text-xs ${
-                  trendTimeRange === range.value ? 'tab-btn-active' : 'tab-btn-inactive'
-                }`}
+                onClick={() => setDeptDropdownOpen(!deptDropdownOpen)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs text-white/80 transition-all"
               >
-                {range.label}
+                <Building2 className="w-3.5 h-3.5" />
+                {currentDeptName}
+                <ChevronDown className={`w-3 h-3 transition-transform ${deptDropdownOpen ? 'rotate-180' : ''}`} />
               </button>
-            ))}
+              {deptDropdownOpen && (
+                <div className="absolute right-0 top-full mt-1 w-44 bg-navy-800 border border-white/10 rounded-lg shadow-xl z-20 overflow-hidden animate-fade-in">
+                  <button
+                    onClick={() => { setTrendDepartmentId('all'); setDeptDropdownOpen(false); }}
+                    className={`w-full flex items-center gap-2 px-3 py-2 text-xs text-left transition-colors ${
+                      trendDepartmentId === 'all'
+                        ? 'bg-blue-600/20 text-blue-400'
+                        : 'text-white/70 hover:bg-white/5'
+                    }`}
+                  >
+                    <Layers className="w-3.5 h-3.5" />
+                    全部部门
+                  </button>
+                  {departments.map((dept) => (
+                    <button
+                      key={dept.id}
+                      onClick={() => { setTrendDepartmentId(dept.id); setDeptDropdownOpen(false); }}
+                      className={`w-full flex items-center gap-2 px-3 py-2 text-xs text-left transition-colors ${
+                        trendDepartmentId === dept.id
+                          ? 'bg-blue-600/20 text-blue-400'
+                          : 'text-white/70 hover:bg-white/5'
+                      }`}
+                    >
+                      <Building2 className="w-3.5 h-3.5" />
+                      {dept.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="flex items-center gap-1 bg-white/5 rounded-lg p-1">
+              {timeRanges.map((range) => (
+                <button
+                  key={range.value}
+                  onClick={() => setTrendTimeRange(range.value)}
+                  className={`tab-btn text-xs ${
+                    trendTimeRange === range.value ? 'tab-btn-active' : 'tab-btn-inactive'
+                  }`}
+                >
+                  {range.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
         

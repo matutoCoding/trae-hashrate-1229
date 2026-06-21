@@ -25,6 +25,22 @@ export interface RemediationRecord {
   remark: string;
 }
 
+export interface UrgeRecord {
+  id: string;
+  urgedAt: string;
+  urger: string;
+  remark: string;
+}
+
+export interface RescheduleRecord {
+  id: string;
+  oldDueDate: string;
+  newDueDate: string;
+  rescheduledAt: string;
+  operator: string;
+  remark: string;
+}
+
 export interface RemediationTask {
   id: string;
   folderId: string;
@@ -36,6 +52,10 @@ export interface RemediationTask {
   status: RemediationStatus;
   completedAt: string | null;
   remark: string;
+  urgeCount: number;
+  lastUrgedAt: string | null;
+  urgeRecords: UrgeRecord[];
+  rescheduleRecords: RescheduleRecord[];
 }
 
 export interface SharedFolder {

@@ -1,9 +1,9 @@
 import { useState, useMemo } from 'react';
 import { Layout } from '@/components/common/Layout';
-import { useAuditStore } from '@/store/useAuditStore';
+import { useAuditStore, type MeetingIssueFilter } from '@/store/useAuditStore';
 import { 
   FileBarChart, TrendingUp, TrendingDown, Calendar, Clock, RefreshCw, Award, AlertTriangle,
-  Users, ChevronDown, ChevronRight, Presentation, BarChart3, Folder, UserCircle, CheckCircle2, XCircle, AlertOctagon, ListTodo
+  Users, ChevronDown, ChevronRight, Presentation, BarChart3, Folder, UserCircle, CheckCircle2, XCircle, AlertOctagon, ListTodo, MessageSquare, Bell
 } from 'lucide-react';
 import { formatNumber } from '@/utils/format';
 import { RiskBadge } from '@/components/common/RiskBadge';
@@ -12,20 +12,51 @@ import { formatDate } from '@/utils/date';
 
 type ReportView = 'overview' | 'meeting';
 
+const filterConfig: { key: MeetingIssueFilter; label: string; icon: any; color: string }[] = [
+  { key: 'new', label: '本月新增', icon: FileBarChart, color: 'blue' },
+  { key: 'closed', label: '本月关闭', icon: CheckCircle2, color: 'emerald' },
+  { key: 'overdue', label: '逾期问题', icon: XCircle, color: 'red' },
+  { key: 'recurring', label: '复发问题', icon: RefreshCw, color: 'amber' },
+];
+
 export function MonthlyReport() {
-  const { monthlyReport, folders, departments, toggleDepartmentInReport, expandedDepartmentsInReport } = useAuditStore();
+  const { monthlyReport, folders, departments, toggleDepartmentInReport, expandedDepartmentsInReport, meetingIssueFilterByDept, setMeetingIssueFilter } = useAuditStore();
   const { departmentRankings, topRecurringIssues } = monthlyReport;
   const [activeView, setActiveView] = useState<ReportView>('overview');
+  
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  
+  const filterIssues = (deptFolders: any[], filter: MeetingIssueFilter) => {
+    switch (filter) {
+      case 'new':
+        return deptFolders.filter(f => new Date(f.firstDiscoveredAt) >= monthStart);
+      case 'closed':
+        return deptFolders.filter(f => f.currentTask?.status === 'completed' && f.currentTask.completedAt && new Date(f.currentTask.completedAt) >= monthStart);
+      case 'overdue':
+        return deptFolders.filter(f => 
+          (f.currentTask?.status === 'overdue') || 
+          (f.currentTask?.dueDate && new Date(f.currentTask.dueDate) < now && f.currentTask.status !== 'completed') ||
+          (f.nextReviewDue && new Date(f.nextReviewDue) < now)
+        );
+      case 'recurring':
+        return deptFolders.filter(f => f.remediationHistory.length >= 2);
+      default:
+        return deptFolders;
+    }
+  };
   
   const deptIssueStats = useMemo(() => {
     return departments.map(dept => {
       const deptFolders = folders.filter(f => f.departmentId === dept.id);
-      const now = new Date();
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
       
       const newRisks = deptFolders.filter(f => new Date(f.firstDiscoveredAt) >= monthStart).length;
       const closed = deptFolders.filter(f => f.currentTask?.status === 'completed' && f.currentTask.completedAt && new Date(f.currentTask.completedAt) >= monthStart).length;
-      const overdue = deptFolders.filter(f => f.currentTask?.status === 'overdue' || (f.nextReviewDue && new Date(f.nextReviewDue) < now)).length;
+      const overdue = deptFolders.filter(f => 
+        (f.currentTask?.status === 'overdue') || 
+        (f.currentTask?.dueDate && new Date(f.currentTask.dueDate) < now && f.currentTask.status !== 'completed') ||
+        (f.nextReviewDue && new Date(f.nextReviewDue) < now)
+      ).length;
       const recurring = deptFolders.filter(f => f.remediationHistory.length >= 2).length;
       const pending = deptFolders.filter(f => f.currentTask?.status === 'pending' || f.currentTask?.status === 'in_progress').length;
       
@@ -36,14 +67,27 @@ export function MonthlyReport() {
         overdue,
         recurring,
         pending,
-        issues: deptFolders.filter(f => 
-          f.riskLevel === 'high' || 
-          f.currentTask?.status === 'overdue' ||
-          (f.nextReviewDue && new Date(f.nextReviewDue) < now)
-        ).slice(0, 10),
+        allIssues: deptFolders,
+        newIssues: filterIssues(deptFolders, 'new'),
+        closedIssues: filterIssues(deptFolders, 'closed'),
+        overdueIssues: filterIssues(deptFolders, 'overdue'),
+        recurringIssues: filterIssues(deptFolders, 'recurring'),
       };
     }).sort((a, b) => (b.newRisks + b.overdue + b.recurring) - (a.newRisks + a.overdue + a.recurring));
   }, [departments, folders]);
+  
+  const getNextAction = (folder: any): string => {
+    if (!folder.currentTask) return '待分配整改任务';
+    if (folder.currentTask.status === 'completed') return '已完成，持续监控';
+    if (folder.currentTask.status === 'overdue') return `已逾期 ${folder.currentTask.urgeCount || 0} 次催办，建议升级处理`;
+    if (folder.currentTask.dueDate) {
+      const daysLeft = Math.ceil((new Date(folder.currentTask.dueDate).getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+      if (daysLeft < 0) return `已逾期 ${Math.abs(daysLeft)} 天，立即跟进`;
+      if (daysLeft <= 3) return `剩余 ${daysLeft} 天，建议提醒确认进度`;
+      return `剩余 ${daysLeft} 天，按计划推进`;
+    }
+    return '跟进整改进度';
+  };
   
   return (
     <Layout 
@@ -261,7 +305,7 @@ export function MonthlyReport() {
                 <div>
                   <p className="text-sm font-medium text-white">安全例会视图</p>
                   <p className="text-xs text-white/60 mt-1">
-                    按部门展开查看本月新增、关闭、逾期和复发问题，点击部门行可展开详细问题清单，直接追问对应责任人。
+                    按部门展开查看本月新增、关闭、逾期和复发问题，点击部门行可展开详细问题清单，并通过标签切换不同口径的问题列表。
                   </p>
                 </div>
               </div>
@@ -322,13 +366,20 @@ export function MonthlyReport() {
                     <Users className="w-4 h-4 text-blue-400" />
                     部门问题清单
                   </h3>
-                  <p className="text-xs text-white/50">点击部门名称展开详细问题</p>
+                  <p className="text-xs text-white/50">点击部门名称展开，可切换问题口径</p>
                 </div>
               </div>
               
               <div className="divide-y divide-white/5">
                 {deptIssueStats.map((dept, deptIndex) => {
                   const isExpanded = expandedDepartmentsInReport.includes(dept.id);
+                  const activeFilter: MeetingIssueFilter = meetingIssueFilterByDept[dept.id] || 'new';
+                  const filteredIssues = 
+                    activeFilter === 'new' ? dept.newIssues :
+                    activeFilter === 'closed' ? dept.closedIssues :
+                    activeFilter === 'overdue' ? dept.overdueIssues :
+                    dept.recurringIssues;
+                  
                   return (
                     <div key={dept.id}>
                       <div
@@ -380,54 +431,106 @@ export function MonthlyReport() {
                       
                       {isExpanded && (
                         <div className="bg-white/[0.02] border-t border-white/5 p-4 pl-14 animate-fade-in">
-                          {dept.issues.length > 0 ? (
+                          <div className="flex items-center gap-1 bg-white/5 rounded-lg p-1 w-fit mb-4">
+                            {filterConfig.map(fc => {
+                              const Icon = fc.icon;
+                              const isActive = activeFilter === fc.key;
+                              return (
+                                <button
+                                  key={fc.key}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setMeetingIssueFilter(dept.id, fc.key);
+                                  }}
+                                  className={`tab-btn text-xs flex items-center gap-1.5 ${isActive ? 'tab-btn-active' : 'tab-btn-inactive'}`}
+                                >
+                                  <Icon className="w-3.5 h-3.5" />
+                                  {fc.label}
+                                  <span className={`ml-1 px-1.5 py-0.5 rounded text-[10px] font-mono ${
+                                    isActive ? 'bg-white/20 text-white' : 'bg-white/10 text-white/60'
+                                  }`}>
+                                    {fc.key === 'new' ? dept.newRisks :
+                                     fc.key === 'closed' ? dept.closed :
+                                     fc.key === 'overdue' ? dept.overdue :
+                                     dept.recurring}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                          
+                          {filteredIssues.length > 0 ? (
                             <div className="space-y-2">
-                              {dept.issues.map((folder) => (
+                              {filteredIssues.map((folder: any) => (
                                 <div 
                                   key={folder.id}
-                                  className="flex items-start gap-3 p-3 rounded-lg bg-white/5 border border-white/5 hover:bg-white/10 transition-colors"
+                                  className="p-4 rounded-lg bg-white/5 border border-white/5 hover:bg-white/10 transition-colors"
                                 >
-                                  <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center flex-shrink-0">
-                                    <Folder className="w-4 h-4 text-blue-400" />
-                                  </div>
-                                  
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                      <p className="text-sm font-medium text-white">{folder.name}</p>
-                                      <RiskBadge level={folder.riskLevel} size="sm" />
-                                      {folder.currentTask && <StatusBadge status={folder.currentTask.status} size="sm" />}
+                                  <div className="flex items-start gap-3">
+                                    <div className="w-9 h-9 rounded-lg bg-blue-500/10 flex items-center justify-center flex-shrink-0">
+                                      <Folder className="w-4 h-4 text-blue-400" />
                                     </div>
-                                    <p className="text-xs text-white/40 mt-0.5 font-mono truncate">{folder.path}</p>
                                     
-                                    <div className="flex items-center gap-4 mt-2 text-xs">
-                                      <span className="flex items-center gap-1 text-white/60">
-                                        <UserCircle className="w-3 h-3" />
-                                        责任人: <span className="text-white/80 font-medium">{folder.owner}</span>
-                                      </span>
-                                      {folder.nextReviewDue && (
-                                        <span className="flex items-center gap-1 text-white/60">
-                                          <Calendar className="w-3 h-3" />
-                                          复核: <span className={new Date(folder.nextReviewDue) < new Date() ? 'text-red-400' : 'text-white/80'}>
-                                            {formatDate(folder.nextReviewDue)}
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <p className="text-sm font-medium text-white">{folder.name}</p>
+                                        <RiskBadge level={folder.riskLevel} size="sm" />
+                                        {folder.currentTask && <StatusBadge status={folder.currentTask.status} size="sm" />}
+                                        {folder.currentTask?.urgeCount > 0 && (
+                                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 text-[10px] border border-red-500/30">
+                                            <Bell className="w-3 h-3" />
+                                            已催办 {folder.currentTask.urgeCount} 次
                                           </span>
-                                        </span>
-                                      )}
-                                      {folder.currentTask?.dueDate && (
+                                        )}
+                                      </div>
+                                      <p className="text-xs text-white/40 mt-0.5 font-mono truncate">{folder.path}</p>
+                                      
+                                      <div className="flex items-center gap-4 mt-2.5 text-xs flex-wrap">
                                         <span className="flex items-center gap-1 text-white/60">
-                                          <ListTodo className="w-3 h-3" />
-                                          整改截止: <span className={new Date(folder.currentTask.dueDate) < new Date() ? 'text-red-400' : 'text-white/80'}>
-                                            {formatDate(folder.currentTask.dueDate)}
-                                          </span>
+                                          <UserCircle className="w-3 h-3" />
+                                          责任人: <span className="text-white/80 font-medium">{folder.owner}</span>
                                         </span>
-                                      )}
+                                        {folder.nextReviewDue && (
+                                          <span className="flex items-center gap-1 text-white/60">
+                                            <Calendar className="w-3 h-3" />
+                                            复核: <span className={new Date(folder.nextReviewDue) < now ? 'text-red-400' : 'text-white/80'}>
+                                              {formatDate(folder.nextReviewDue)}
+                                            </span>
+                                          </span>
+                                        )}
+                                        {folder.currentTask?.dueDate && (
+                                          <span className="flex items-center gap-1 text-white/60">
+                                            <ListTodo className="w-3 h-3" />
+                                            整改截止: <span className={new Date(folder.currentTask.dueDate) < now ? 'text-red-400' : 'text-white/80'}>
+                                              {formatDate(folder.currentTask.dueDate)}
+                                            </span>
+                                          </span>
+                                        )}
+                                        {folder.currentTask?.lastUrgedAt && (
+                                          <span className="flex items-center gap-1 text-amber-400">
+                                            <Bell className="w-3 h-3" />
+                                            最近催办: {formatDate(folder.currentTask.lastUrgedAt)}
+                                          </span>
+                                        )}
+                                      </div>
+                                      
+                                      <div className="mt-3 pt-3 border-t border-white/5">
+                                        <div className="flex items-start gap-2">
+                                          <MessageSquare className="w-3.5 h-3.5 text-amber-400 mt-0.5 flex-shrink-0" />
+                                          <div>
+                                            <p className="text-xs text-white/50">下一步追问动作</p>
+                                            <p className="text-xs text-white/80 mt-0.5">{getNextAction(folder)}</p>
+                                          </div>
+                                        </div>
+                                      </div>
                                     </div>
                                   </div>
                                 </div>
                               ))}
                             </div>
                           ) : (
-                            <div className="text-center py-6 text-white/40 text-sm">
-                              本月暂无突出问题 🎉
+                            <div className="text-center py-8 text-white/40 text-sm">
+                              该口径下暂无问题 🎉
                             </div>
                           )}
                         </div>
