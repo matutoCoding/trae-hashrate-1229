@@ -8,7 +8,7 @@ interface MetricCardProps {
   value: number;
   icon: LucideIcon;
   trend: number;
-  color: 'blue' | 'red' | 'amber' | 'emerald';
+  color: 'blue' | 'red' | 'amber' | 'emerald' | 'purple' | 'pink';
   delay?: number;
   subtitle?: string;
 }
@@ -77,6 +77,20 @@ export function MetricCard({ title, value, icon: Icon, trend, color, delay = 0, 
       iconBg: 'bg-emerald-500/20',
       iconColor: 'text-emerald-400',
       iconGlow: 'shadow-[0_0_20px_rgba(16,185,129,0.3)]',
+    },
+    purple: {
+      bg: 'from-purple-500/20 to-purple-600/5',
+      border: 'border-purple-500/20',
+      iconBg: 'bg-purple-500/20',
+      iconColor: 'text-purple-400',
+      iconGlow: 'shadow-[0_0_20px_rgba(139,92,246,0.3)]',
+    },
+    pink: {
+      bg: 'from-pink-500/20 to-pink-600/5',
+      border: 'border-pink-500/20',
+      iconBg: 'bg-pink-500/20',
+      iconColor: 'text-pink-400',
+      iconGlow: 'shadow-[0_0_20px_rgba(236,72,153,0.3)]',
     },
   };
   
